@@ -1,0 +1,180 @@
+{
+ "version": 1,
+ "lastExport": null,
+ "plans": [
+  {
+   "id": "plan-ganzkoerper",
+   "name": "Ganzkörperplan",
+   "units": [
+    {
+     "id": "u1",
+     "name": "Einheit 1"
+    }
+   ],
+   "exercises": [
+    {
+     "id": "x1",
+     "name": "Latziehen",
+     "sets": 3,
+     "repMin": 8,
+     "repMax": 12,
+     "guide": 39,
+     "perDumbbell": false,
+     "note": "",
+     "onlyUnits": [],
+     "variants": []
+    },
+    {
+     "id": "x2",
+     "name": "Bizepscurls oder Hammercurls",
+     "sets": 2,
+     "repMin": 12,
+     "repMax": 15,
+     "guide": 10,
+     "perDumbbell": true,
+     "note": "",
+     "onlyUnits": [],
+     "variants": [
+      "Bizepscurls",
+      "Hammercurls"
+     ]
+    }
+   ]
+  },
+  {
+   "id": "eigen",
+   "name": "Mein Oberkörper",
+   "units": [
+    {
+     "id": "a",
+     "name": "A"
+    },
+    {
+     "id": "b",
+     "name": "B"
+    }
+   ],
+   "exercises": [
+    {
+     "id": "y1",
+     "name": "Dips",
+     "sets": 3,
+     "repMin": 6,
+     "repMax": 10,
+     "guide": null,
+     "perDumbbell": false,
+     "note": "",
+     "onlyUnits": [
+      "a"
+     ],
+     "variants": []
+    },
+    {
+     "id": "y2",
+     "name": "Curls",
+     "sets": 2,
+     "repMin": 10,
+     "repMax": 12,
+     "guide": 8,
+     "perDumbbell": true,
+     "note": "",
+     "onlyUnits": [],
+     "variants": [
+      "Curl SZ",
+      "Curl KH"
+     ]
+    }
+   ]
+  }
+ ],
+ "sessions": [
+  {
+   "id": "old1",
+   "planId": "plan-ganzkoerper",
+   "planName": "Ganzkörperplan",
+   "unitId": "u1",
+   "unitName": "Einheit 1",
+   "date": "2026-11-01",
+   "createdAt": 1,
+   "finishedAt": 2,
+   "status": "done",
+   "exercises": [
+    {
+     "slotId": "x1",
+     "label": "Latziehen",
+     "variants": [],
+     "variant": "Latziehen",
+     "key": "latziehen",
+     "targetSets": 3,
+     "repMin": 8,
+     "repMax": 12,
+     "guide": 39,
+     "perDumbbell": false,
+     "note": "",
+     "skipped": false,
+     "sets": [
+      {
+       "w": 39,
+       "r": 10
+      },
+      {
+       "w": 39,
+       "r": 9
+      },
+      {
+       "w": null,
+       "r": null
+      }
+     ]
+    },
+    {
+     "slotId": "x2",
+     "label": "Bizepscurls oder Hammercurls",
+     "variants": [
+      "Bizepscurls",
+      "Hammercurls"
+     ],
+     "variant": "Hammercurls",
+     "key": "hammercurls",
+     "targetSets": 2,
+     "repMin": 12,
+     "repMax": 15,
+     "guide": 10,
+     "perDumbbell": true,
+     "note": "",
+     "skipped": false,
+     "sets": [
+      {
+       "w": 10,
+       "r": 14
+      },
+      {
+       "w": 10,
+       "r": 13
+      }
+     ]
+    },
+    {
+     "slotId": "x3",
+     "label": "Kurzhantelbankdrücken (Flachbank)",
+     "variants": [],
+     "variant": "Kurzhantelbankdrücken (Flachbank)",
+     "key": "kurzhantelbankdrücken (flachbank)",
+     "targetSets": 3,
+     "repMin": 8,
+     "repMax": 12,
+     "guide": null,
+     "perDumbbell": true,
+     "note": "",
+     "skipped": false,
+     "sets": [
+      {
+       "w": 22,
+       "r": 8
+      }
+     ]
+    }
+   ]
+  }
+ ]
+}

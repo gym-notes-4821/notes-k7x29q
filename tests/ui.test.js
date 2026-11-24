@@ -1,8 +1,9 @@
 // Oberflächentest (390 × 844). Benötigt Playwright + Chromium und einen Server auf Port 8123:
 //   python3 -m http.server 8123   (im Projektordner)   dann: node tests/ui.test.js [screenshot-ordner]
+// Andere Adresse: APP_URL=http://localhost:9000/ node tests/ui.test.js
 const { chromium } = require('playwright');
 const fs = require('fs');
-const URL = 'http://localhost:8123/';
+const URL = process.env.APP_URL || 'http://localhost:8123/';
 const SHOTS = process.argv[2] || null;
 let fails = 0;
 const ok = (c, m) => { console.log((c ? 'PASS ' : 'FAIL ') + m); if (!c) fails++; };
@@ -45,7 +46,17 @@ const STORE = 'trainingsapp.v1';
   const latLast = await card('Latziehen').locator('.last').innerText();
   ok(/^Letztes Mal \(Startwerte, \d\d\.\d\d\.\): 45 kg × 12 \/ 12 \/ 10$/.test(latLast), '2 „Letztes Mal“ zeigt Startwerte: ' + latLast);
   ok((await card('Bankdrücken mit Kurzhanteln').innerText()).includes('pro Hantel'), '2 Hinweis „pro Hantel“');
-  ok((await card('Hackenschmidt').locator('input[data-f=w]').first().inputValue()) === '', '2 Felder sind leer (kein automatischer Eintrag)');
+  const kgOf = async n => card(n).locator('input[data-f=w]').evaluateAll(els => els.map(e => e.value).join('/'));
+  const repsOf = async n => card(n).locator('input[data-f=r]').evaluateAll(els => els.map(e => e.value).join('/'));
+  ok(await kgOf('Latziehen') === '45/45/45' && await repsOf('Latziehen') === '//', '2 kg vom letzten Mal vorausgefüllt, Wdh. leer');
+  ok(await kgOf('Kreuzheben') === '42,5/42,5', '2 Dezimalgewicht 42,5 vorausgefüllt');
+  await card('Hackenschmidt').locator('.set-row').nth(0).locator('input[data-f=w]').fill('12,5');
+  await card('Hackenschmidt').locator('.set-row').nth(0).locator('input[data-f=w]').blur();
+  ok(await kgOf('Hackenschmidt') === '12,5/12,5/12,5', '2 Geändertes Gewicht wird an Folgesätze weitergegeben');
+  await go(''); await page.waitForTimeout(100);
+  ok(await page.locator('.tile-main .hint').count() === 1, '2 Training mit geändertem Gewicht zeigt „Weitermachen“');
+  ok(await page.evaluate(k => JSON.parse(localStorage.getItem(k)).sessions.filter(s => s.status === 'active').length, STORE) === 1, '2 Angefangenes (Gewicht geändert) bleibt gespeichert');
+  await page.click('.tile-main'); await page.waitForSelector('.ex-card');
 
   // 3./4. Werte eintragen, Fokussprung, Dezimalgewichte
   const row = (n, j) => card(n).locator('.set-row').nth(j);
@@ -118,6 +129,14 @@ const STORE = 'trainingsapp.v1';
   ok(await cls('Bizepscurls') === 's-up' && await cls('Trizeps am Turm 1') === 's-same', '10/11 Bizepscurls und Turm 1 einzeln bewertet');
   ok((await page.locator('.sub').allInnerTexts()).join('|').toUpperCase() === 'SUPERSATZ A|SUPERSATZ B', '10 Zwischenüberschriften Supersatz A/B');
   await shot(page, '3-auswertung', true);
+
+  // Nächstes Training: kg aus dem gerade abgeschlossenen Training vorausgefüllt
+  await go(''); await page.click('.tile-main'); await page.waitForSelector('.ex-card');
+  ok(await card('Schulterdrücken').locator('input[data-f=w]').evaluateAll(els => els.map(e => e.value).join('/')) === '17,5/15/15', 'Nächstes Training: kg vom letzten Training (17,5/15/15)');
+  ok(await card('Bankdrücken mit Kurzhanteln').locator('input[data-f=w]').evaluateAll(els => els.map(e => e.value).join('/')) === '35/35/35', 'Übersprungene Übung: kg vom letzten echten Eintrag');
+  ok(await ssA.locator('input[data-f=w]').nth(0).inputValue() === '12', 'Supersatz: kg vorausgefüllt');
+  await go('');
+  ok(await page.locator('.tile-main .hint').count() === 0 && (await store()).sessions.filter(s => s.status === 'active').length === 0, 'Unberührtes Training wird beim Verlassen verworfen');
 
   // Fortschritt
   await go('#/fortschritt');

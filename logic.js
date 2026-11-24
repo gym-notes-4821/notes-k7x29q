@@ -156,6 +156,28 @@ function previousEntry(key, session) {
   return h[h.length - 1] || null;
 }
 
+/**
+ * Füllt beim Start eines Trainings die Gewichte (nicht die Wiederholungen) mit den Werten
+ * vom letzten Training dieser Übung vor. Gibt es noch keins, wird das Orientierungsgewicht genommen.
+ */
+function prefillWeights(session) {
+  for (const ex of session.exercises) {
+    const prev = previousEntry(ex.key, session);
+    const ws = prev ? prev.ex.sets.filter(isValidSet).map(x => x.w) : [];
+    ex.sets.forEach((set, j) => {
+      if (set.w != null || set.r != null) return;
+      const w = ws.length ? ws[Math.min(j, ws.length - 1)] : ex.guide;
+      if (w != null) set.w = w;
+    });
+  }
+  session.prefill = weightSignature(session);
+  return session;
+}
+const weightSignature = session => JSON.stringify(session.exercises.map(e => e.sets.map(x => x.w)));
+/** Ein Training gilt als unberührt, solange nichts außer den vorausgefüllten Gewichten drinsteht. */
+const isUntouched = s => s.status === 'active' && s.exercises.every(e => !e.skipped && e.sets.every(x => x.r == null)) &&
+  (s.prefill ? weightSignature(s) === s.prefill : s.exercises.every(e => e.sets.every(x => x.w == null)));
+
 /* ---------------- Bewertung ---------------- */
 const rankSets = sets => [...sets].sort((a, b) => b.w - a.w || b.r - a.r);
 function cmpPair(a, b) {
@@ -356,7 +378,7 @@ const api = {
   START_PLAN_ID, START_VALUES, mkPlanEx, defaultPlan, snapshotEx, newSession, baselineSession, freshDb, validDb, migrate,
   setDb, getDb, sessionOrder, doneSessions, isValidSet, validSets, bestE1, bestSetByE1, exerciseHistory, previousEntry,
   rankSets, cmpPair, compareSets, diffText, explain, trendFor, analyzeExercise, latestProgress, planProgress,
-  forecastFor, forecastText, planForecast, blocks, normalizeGroups, MAX_WEEKLY,
+  forecastFor, forecastText, planForecast, blocks, normalizeGroups, MAX_WEEKLY, prefillWeights, isUntouched,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.Logic = api;

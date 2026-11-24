@@ -38,7 +38,7 @@ const getPlan = id => db.plans.find(p => p.id === id);
 const getSession = id => db.sessions.find(s => s.id === id);
 const activePlan = () => getPlan(db.activePlanId) || db.plans[0] || null;
 const activeSession = () => db.sessions.find(s => s.status === 'active');
-const untouched = s => s.status === 'active' && s.exercises.every(e => !e.skipped && e.sets.every(x => x.w == null && x.r == null));
+const untouched = L.isUntouched;
 const sessionLabel = s => s.kind === 'baseline' ? 'Startwerte' : `${esc(s.planName)}${s.unitName ? ' · ' + esc(s.unitName) : ''}`;
 
 /* ---------------- Gemeinsame Bausteine ---------------- */
@@ -177,7 +177,7 @@ function viewTrainingEntry() {
   if (!s) {
     const plan = activePlan();
     if (!plan) { setTimeout(() => location.replace('#/plaene'), 0); return ''; }
-    s = L.newSession(plan, todayISO());
+    s = L.prefillWeights(L.newSession(plan, todayISO())); // kg vom letzten Mal vorausfüllen
     db.sessions.push(s); save();
   }
   setTimeout(() => location.replace(`#/training/${s.id}`), 0);
@@ -514,17 +514,28 @@ $app.addEventListener('change', ev => {
   const t = ev.target;
   if (t.dataset.act === 'date') { const s = currentSession(); if (t.value) { s.date = t.value > todayISO() ? todayISO() : t.value; save(); rerenderKeepScroll(); toast('Datum geändert'); } return; }
   if (t.dataset.f === 'w') {
-    // Gewicht für die folgenden leeren Sätze derselben Übung vorschlagen
+    // Neues Gewicht an die folgenden Sätze derselben Übung weitergeben, solange dort noch keine
+    // Wiederholungen stehen und das Gewicht leer ist oder dem bisherigen (vorausgefüllten) Wert entspricht
     const s = currentSession(), i = +t.dataset.ex, ex = s.exercises[i], w = ex.sets[+t.dataset.set].w;
+    const old = t.dataset.before === '' || t.dataset.before == null ? null : parseFloat(t.dataset.before);
+    t.dataset.before = w ?? '';
     if (w == null) return;
-    for (let j = +t.dataset.set + 1; j < ex.sets.length; j++)
-      if (ex.sets[j].w == null && ex.sets[j].r == null) { ex.sets[j].w = w; setInput(i, j, 'w', w); }
+    for (let j = +t.dataset.set + 1; j < ex.sets.length; j++) {
+      const x = ex.sets[j];
+      if (x.r == null && (x.w == null || x.w === old)) { x.w = w; setInput(i, j, 'w', w); }
+    }
     save(); return;
   }
   if (t.dataset.act === 'import') { importFile(t.files[0]); t.value = ''; return; }
   const p = currentPlan(); if (!p) return;
   if (t.dataset.slot === 'perDumbbell') { currentSlot(p).perDumbbell = t.checked; save(); }
   if (t.dataset.slot === 'group') { const e = currentSlot(p); e.group = t.value || null; normalizeGroups(p); save(); toast(e.group ? `Zu Supersatz ${e.group} hinzugefügt` : 'Aus Supersatz entfernt'); rerenderKeepScroll(); }
+});
+
+// Gewicht beim Betreten des Feldes merken, damit eine Änderung an die Folgesätze weitergegeben werden kann
+$app.addEventListener('focusin', ev => {
+  const t = ev.target;
+  if (t.dataset && t.dataset.f === 'w') { const s = currentSession(); const w = s && s.exercises[+t.dataset.ex].sets[+t.dataset.set].w; t.dataset.before = w ?? ''; }
 });
 
 $app.addEventListener('keydown', ev => {

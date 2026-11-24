@@ -168,6 +168,32 @@ test('Gesamtprognose des Plans in Prozent', () => {
   assert.strictEqual(pf.count, 1); assert.ok(pf.pct > 0 && pf.pct <= 2 * 30 / 7 + 1e-9, String(pf.pct));
 });
 
+test('Vorausfüllen: kg vom letzten Training, Wiederholungen leer', () => {
+  const db = L.freshDb(); L.setDb(db);
+  const plan = db.plans[0];
+  const a = L.prefillWeights(L.newSession(plan, today));
+  assert.deepStrictEqual(exOf(a, 'Kreuzheben').sets, [{ w: 42.5, r: null }, { w: 42.5, r: null }]);
+  assert.deepStrictEqual(exOf(a, 'Hammercurls').sets.map(x => x.w), [12.5, 12.5]);
+  assert.ok(a.exercises.every(e => e.sets.every(x => x.r == null)));
+  assert.ok(L.isUntouched(a), 'nur vorausgefüllt = unberührt');
+  // Letztes echtes Training hat Vorrang; fehlende Sätze nehmen das letzte vorhandene Gewicht
+  addTraining(db, today, { 'Latziehen': [[47.5, 12], [45, 12]], 'Seitheben': 'skip' });
+  const b2 = L.prefillWeights((() => { const x = L.newSession(plan, today); x.createdAt = Date.now() + 1000; return x; })());
+  assert.deepStrictEqual(exOf(b2, 'Latziehen').sets.map(x => x.w), [47.5, 45, 45]);
+  // Übersprungen zählt nicht: Seitheben fällt auf die Startwerte zurück
+  assert.deepStrictEqual(exOf(b2, 'Seitheben').sets.map(x => x.w), [5, 5]);
+  exOf(b2, 'Latziehen').sets[0].w = 50;
+  assert.ok(!L.isUntouched(b2), 'geändertes Gewicht = angefangen');
+  exOf(b2, 'Latziehen').sets[0].w = 47.5; exOf(b2, 'Latziehen').sets[0].r = 10;
+  assert.ok(!L.isUntouched(b2), 'eingetragene Wiederholungen = angefangen');
+});
+test('Vorausfüllen ohne Vorgeschichte: Orientierungsgewicht oder leer', () => {
+  const db = L.freshDb(); L.setDb(db);
+  const plan = { id: 'p', name: 'Neu', exercises: [L.mkPlanEx('Beinpresse', 2, 80), L.mkPlanEx('Plank', 2, null)] };
+  const s = L.prefillWeights(L.newSession(plan, today));
+  assert.deepStrictEqual(s.exercises[0].sets.map(x => x.w), [80, 80]);
+  assert.deepStrictEqual(s.exercises[1].sets.map(x => x.w), [null, null]);
+});
 const v1 = require('./v1-sample.json'); // Daten im alten Format (Version 1)
 test('Migration: Version 1 lädt ohne Fehler, Trainings bleiben erhalten', () => {
   const d = L.migrate(v1); L.setDb(d);

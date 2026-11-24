@@ -41,26 +41,46 @@ const activeSession = () => db.sessions.find(s => s.status === 'active');
 const untouched = L.isUntouched;
 const sessionLabel = s => s.kind === 'baseline' ? 'Startwerte' : `${esc(s.planName)}${s.unitName ? ' · ' + esc(s.unitName) : ''}`;
 
+/* ---- Icons: selbst gezeichnete SVG-Linien-Icons (24×24, Farbe über currentColor) ---- */
+const ICON_PATHS = {
+  plans: '<rect x="5" y="4" width="14" height="17" rx="3"/><path d="M9 4.5V3h6v1.5"/><path d="M9 10h6M9 14h6M9 18h3"/>',
+  dumbbell: '<path d="M6.5 6.5v11M17.5 6.5v11M3.5 9v6M20.5 9v6M6.5 12h11"/>',
+  progress: '<path d="M3 17l6-6 4 4 8-8"/><path d="M15 7h6v6"/>',
+  outlook: '<path d="M3 18l5-5 3 2.5 3.5-4"/><path d="M15.5 10.5l2-2.3M19 6.5l1.5-1.7" stroke-dasharray="1.6 2.4"/><circle cx="20.5" cy="4.8" r="1.2" fill="currentColor"/>',
+  back: '<path d="M15 5l-7 7 7 7"/>',
+  home: '<path d="M4 10.5L12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/>',
+  up: '<path d="M6 15l6-6 6 6"/>',
+  down: '<path d="M6 9l6 6 6-6"/>',
+  link: '<path d="M10 14a4.5 4.5 0 0 0 6.4.4l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.4 1.4"/><path d="M14 10a4.5 4.5 0 0 0-6.4-.4l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.4-1.4"/>',
+  // Ampel-Symbole (gefüllt), damit die Bewertung auch ohne Farbe lesbar bleibt
+  stUp: '<path d="M12 5.5l7 11H5z" fill="currentColor" stroke-width="1.5"/>',
+  stSame: '<path d="M6 9.5h12M6 14.5h12" stroke-width="3"/>',
+  stDown: '<path d="M12 18.5l7-11H5z" fill="currentColor" stroke-width="1.5"/>',
+  stNone: '<circle cx="12" cy="12" r="6" stroke-width="2.6"/>',
+  stSkip: '<path d="M6.5 12h11" stroke-width="3"/>',
+};
+const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name]}</svg>`;
+
 /* ---------------- Gemeinsame Bausteine ---------------- */
 function topbar(title, back = '#/', home = false) {
-  return `<header class="topbar"><a class="back" href="${back}">‹ Zurück</a><h1>${esc(title)}</h1>
-    ${home ? '<a class="home" href="#/" aria-label="Startseite">⌂</a>' : '<span class="home-ph"></span>'}</header>`;
+  return `<header class="topbar"><a class="back" href="${back}">${icon('back')}Zurück</a><h1>${esc(title)}</h1>
+    ${home ? `<a class="home" href="#/" aria-label="Startseite">${icon('home')}</a>` : '<span class="home-ph"></span>'}</header>`;
 }
 const STATUS = {
-  up: { label: 'Stärker', icon: '▲' },
-  same: { label: 'Stagnation', icon: '=' },
-  down: { label: 'Schwächer', icon: '▼' },
-  none: { label: 'Kein Vergleich', icon: '○' },
-  skipped: { label: 'Übersprungen', icon: '–' },
-  fup: { label: 'Steigend', icon: '▲' },
-  fflat: { label: 'Kein Anstieg', icon: '=' },
-  ffew: { label: 'Zu wenig Daten', icon: '○' },
+  up: { label: 'Stärker', icon: 'stUp' },
+  same: { label: 'Stagnation', icon: 'stSame' },
+  down: { label: 'Schwächer', icon: 'stDown' },
+  none: { label: 'Kein Vergleich', icon: 'stNone' },
+  skipped: { label: 'Übersprungen', icon: 'stSkip' },
+  fup: { label: 'Steigend', icon: 'stUp' },
+  fflat: { label: 'Kein Anstieg', icon: 'stSame' },
+  ffew: { label: 'Zu wenig Daten', icon: 'stNone' },
 };
 const CLS = { up: 'up', same: 'same', down: 'down', none: 'grey', skipped: 'grey', fup: 'up', fflat: 'same', ffew: 'grey' };
 function statusRow({ st, name, text, meta, href, perDumbbell }) {
   return `<a class="prow s-${CLS[st]}" href="${href}">
     <div class="prow-top"><span class="pname">${esc(name)}${perDumbbell ? ' <span class="pd">pro Hantel</span>' : ''}</span>
-    <span class="st">${STATUS[st].icon} ${STATUS[st].label}</span></div>
+    <span class="st">${icon(STATUS[st].icon)}${STATUS[st].label}</span></div>
     <div class="ptext">${esc(text)}</div>${meta ? `<div class="pmeta">${meta}</div>` : ''}</a>`;
 }
 /** Liste mit Zwischenüberschriften für Supersätze. rowFn(ex) liefert HTML einer Zeile. */
@@ -164,10 +184,10 @@ function viewHome() {
   return `<div class="home">
     <p class="active-plan">Aktiver Plan: <b>${plan ? esc(plan.name) : 'keiner'}</b></p>
     <div class="tiles">
-      <a class="tile" href="#/plaene"><span class="ic">☰</span><span class="tl">Trainingspläne</span></a>
-      <a class="tile tile-main" href="#/training"><span class="ic">▶</span><span class="tl">Training</span>${run ? '<span class="hint">Weitermachen</span>' : ''}</a>
-      <a class="tile" href="#/fortschritt"><span class="ic">▲</span><span class="tl">Fortschritt</span></a>
-      <a class="tile" href="#/ausblick"><span class="ic">↗</span><span class="tl">Ausblick</span></a>
+      <a class="tile" href="#/plaene"><span class="ic">${icon('plans')}</span><span class="tl">Trainingspläne</span></a>
+      <a class="tile tile-main" href="#/training"><span class="ic">${icon('dumbbell')}</span><span class="tl">Training</span>${run ? '<span class="hint">Weitermachen</span>' : ''}</a>
+      <a class="tile" href="#/fortschritt"><span class="ic">${icon('progress')}</span><span class="tl">Fortschritt</span></a>
+      <a class="tile" href="#/ausblick"><span class="ic">${icon('outlook')}</span><span class="tl">Ausblick</span></a>
     </div></div>`;
 }
 
@@ -252,8 +272,8 @@ function viewWorkout(id) {
 /* ---------------- Auswertung eines Trainings ---------------- */
 function counts(list) {
   const c = st => list.filter(x => x === st).length;
-  return `<div class="counts"><div class="s-up"><b>▲ ${c('up')}</b>stärker</div><div class="s-same"><b>= ${c('same')}</b>gleich</div>
-    <div class="s-down"><b>▼ ${c('down')}</b>schwächer</div><div class="s-grey"><b>○ ${c('none') + c('skipped')}</b>ohne Vgl.</div></div>`;
+  return `<div class="counts"><div class="s-up"><b>${icon('stUp')}${c('up')}</b>stärker</div><div class="s-same"><b>${icon('stSame')}${c('same')}</b>gleich</div>
+    <div class="s-down"><b>${icon('stDown')}${c('down')}</b>schwächer</div><div class="s-grey"><b>${icon('stNone')}${c('none') + c('skipped')}</b>ohne Vgl.</div></div>`;
 }
 function metaFor(a) {
   const parts = [];
@@ -387,7 +407,7 @@ function viewExercise(key, outlook) {
     const a = analyzeExercise(s, ex);
     h += `<tr><td><a href="#/ergebnis/${s.id}">${fmtDate(s.date)}</a>${s.kind === 'baseline' ? '<br><span class="tag">Startwerte</span>' : ''}</td>
       <td>${ex.skipped ? '<span class="muted">übersprungen</span>' : validSets(ex).map(x => `${fmtNum(x.w)} × ${x.r}`).join('<br>')}</td>
-      <td><span class="st-mini s-${CLS[a.status]}">${STATUS[a.status].icon} ${STATUS[a.status].label}</span></td></tr>`;
+      <td><span class="st-mini s-${CLS[a.status]}">${icon(STATUS[a.status].icon)}${STATUS[a.status].label}</span></td></tr>`;
   }
   return h + '</table>';
 }
@@ -412,21 +432,21 @@ function viewPlans() {
 function planExRow(p, e, idx, inGroup, first, last, canLink) {
   const info = [`${e.sets} Sätze`, e.guide != null ? `${fmtNum(e.guide)} kg` : null, e.perDumbbell ? 'pro Hantel' : null].filter(Boolean).join(' · ');
   return `<div class="plan-ex"><a class="info" href="#/plan/${p.id}/uebung/${e.id}"><b>${esc(e.name)}</b><span class="muted small">${info}</span></a>
-    <button class="btn-icon" data-act="${inGroup ? 'move-in' : 'move-block'}" data-idx="${idx}" data-d="-1" ${first ? 'disabled' : ''} aria-label="nach oben">↑</button>
-    <button class="btn-icon" data-act="${inGroup ? 'move-in' : 'move-block'}" data-idx="${idx}" data-d="1" ${last ? 'disabled' : ''} aria-label="nach unten">↓</button>
-    ${!inGroup ? `<button class="btn-icon" data-act="link" data-idx="${idx}" ${canLink ? '' : 'disabled'} aria-label="Mit nächster Übung als Supersatz verbinden" title="Mit nächster Übung als Supersatz verbinden">⛓</button>` : ''}</div>`;
+    <button class="btn-icon" data-act="${inGroup ? 'move-in' : 'move-block'}" data-idx="${idx}" data-d="-1" ${first ? 'disabled' : ''} aria-label="nach oben">${icon('up')}</button>
+    <button class="btn-icon" data-act="${inGroup ? 'move-in' : 'move-block'}" data-idx="${idx}" data-d="1" ${last ? 'disabled' : ''} aria-label="nach unten">${icon('down')}</button>
+    ${!inGroup ? `<button class="btn-icon" data-act="link" data-idx="${idx}" ${canLink ? '' : 'disabled'} aria-label="Mit nächster Übung als Supersatz verbinden" title="Mit nächster Übung als Supersatz verbinden">${icon('link')}</button>` : ''}</div>`;
 }
 function viewPlanEdit(id) {
   const p = getPlan(id);
   if (!p) return topbar('Plan', '#/plaene', true) + '<p class="empty">Plan nicht gefunden.</p>';
   const bl = blocks(p.exercises);
   let h = topbar('Plan bearbeiten', '#/plaene', true) + `<label class="field"><span>Name</span><input data-plan-f="name" value="${esc(p.name)}"></label>
-    <h2>Übungen</h2><p class="muted small">↑↓ ändert die Reihenfolge · ⛓ verbindet eine Übung mit der nächsten zu einem Supersatz.</p><div class="card">`;
+    <h2>Übungen</h2><p class="muted small help-icons">${icon('up')}${icon('down')} ändert die Reihenfolge · ${icon('link')} verbindet eine Übung mit der nächsten zu einem Supersatz.</p><div class="card">`;
   bl.forEach((b, bi) => {
     if (b.group) {
       h += `<div class="plan-group"><div class="plan-group-head"><b class="spacer">Supersatz ${esc(b.group)}</b>
-        <button class="btn-icon" data-act="move-block" data-idx="${b.items[0].idx}" data-d="-1" ${bi === 0 ? 'disabled' : ''} aria-label="Supersatz nach oben">↑</button>
-        <button class="btn-icon" data-act="move-block" data-idx="${b.items[0].idx}" data-d="1" ${bi === bl.length - 1 ? 'disabled' : ''} aria-label="Supersatz nach unten">↓</button>
+        <button class="btn-icon" data-act="move-block" data-idx="${b.items[0].idx}" data-d="-1" ${bi === 0 ? 'disabled' : ''} aria-label="Supersatz nach oben">${icon('up')}</button>
+        <button class="btn-icon" data-act="move-block" data-idx="${b.items[0].idx}" data-d="1" ${bi === bl.length - 1 ? 'disabled' : ''} aria-label="Supersatz nach unten">${icon('down')}</button>
         <button class="btn-small btn-ghost" data-act="unlink" data-group="${esc(b.group)}">Auflösen</button></div>
         ${b.items.map((it, k) => planExRow(p, it.ex, it.idx, true, k === 0, k === b.items.length - 1)).join('')}</div>`;
     } else {

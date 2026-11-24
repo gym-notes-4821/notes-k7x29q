@@ -246,3 +246,21 @@ svg .dot { fill: var(--accent); }
 .s-up { background: linear-gradient(90deg, rgba(57,255,20,.14), var(--card) 70%); }
 .s-up .st, .st-mini.s-up { color: #000; }
 .counts .s-up b { text-shadow: 0 0 10px rgba(57,255,20,.5); }
+
+/* ---------------- Icons ---------------- */
+.i { width: 1em; height: 1em; flex: none; vertical-align: -0.14em; }
+.topbar .back { gap: 4px; padding-left: 8px; }
+.topbar .back .i { width: 22px; height: 22px; stroke-width: 2.6; }
+.topbar .home .i { width: 24px; height: 24px; }
+.tile .ic { display: grid; place-items: center; width: 64px; height: 64px; border-radius: 20px;
+  background: rgba(57,255,20,.08); border: 1px solid rgba(57,255,20,.25); text-shadow: none; }
+.tile .ic .i { width: 36px; height: 36px; stroke-width: 2.1; filter: drop-shadow(0 0 6px rgba(57,255,20,.7)); }
+.tile-main .ic { background: rgba(57,255,20,.16); border-color: rgba(57,255,20,.5); }
+.btn-icon .i { width: 22px; height: 22px; stroke-width: 2.4; }
+.st { display: inline-flex; align-items: center; gap: 4px; }
+.st .i, .st-mini .i { width: 14px; height: 14px; }
+.st-mini { display: inline-flex; align-items: center; gap: 3px; }
+.st-mini .i { width: 11px; height: 11px; }
+.counts b { display: flex; align-items: center; justify-content: center; gap: 5px; }
+.counts b .i { width: 16px; height: 16px; }
+.help-icons .i { width: 16px; height: 16px; vertical-align: -0.2em; }

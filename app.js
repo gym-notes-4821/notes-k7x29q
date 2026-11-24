@@ -61,6 +61,14 @@ const ICON_PATHS = {
 };
 const icon = (name, cls = '') => `<svg class="i ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${ICON_PATHS[name]}</svg>`;
 
+/* ---- Logo: Dackel im Neon-Stil ---- */
+const DACKEL = `<svg class="brand-dog" viewBox="22 22 228 106" fill="none" stroke="currentColor" stroke-width="6" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+  <path d="M180 64 C166 57 92 55 64 59 C46 61 41 79 49 93 L49 116 L60 116 L62 98 C92 102 138 102 154 98 L156 116 L167 116 L169 95 C180 91 186 80 180 64 Z"/>
+  <path d="M50 68 C38 62 31 50 30 38"/>
+  <path d="M176 62 C177 47 184 37 195 35 C204 33 210 36 215 41 L235 53 C239 56 237 61 231 61 L207 61 C200 63 192 67 186 71"/>
+  <path d="M196 39 C185 45 185 62 194 66 C201 61 203 49 196 39 Z"/>
+  <circle cx="207" cy="45" r="3.4" fill="currentColor" stroke="none"/><circle cx="235" cy="56" r="3.6" fill="currentColor" stroke="none"/></svg>`;
+
 /* ---------------- Gemeinsame Bausteine ---------------- */
 function topbar(title, back = '#/', home = false) {
   return `<header class="topbar"><a class="back" href="${back}">${icon('back')}Zurück</a><h1>${esc(title)}</h1>
@@ -182,6 +190,7 @@ window.addEventListener('hashchange', () => {
 function viewHome() {
   const plan = activePlan(), run = activeSession();
   return `<div class="home">
+    <header class="brand" aria-label="Gym Notes">${DACKEL}<span class="wordmark">GYM <b>NOTES</b></span></header>
     <p class="active-plan">Aktiver Plan: <b>${plan ? esc(plan.name) : 'keiner'}</b></p>
     <div class="tiles">
       <a class="tile" href="#/plaene"><span class="ic">${icon('plans')}</span><span class="tl">Trainingspläne</span></a>

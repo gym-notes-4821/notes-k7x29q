@@ -1,6 +1,6 @@
 {
-  "name": "Trainingsapp",
-  "short_name": "Training",
+  "name": "Gym Notes",
+  "short_name": "Gym Notes",
   "lang": "de",
   "start_url": "./",
   "scope": "./",

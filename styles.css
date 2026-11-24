@@ -60,7 +60,7 @@ a { color: var(--accent); }
 .active-plan b { color: var(--text); }
 .tiles {
   display: grid; grid-template-columns: 1fr 1fr; gap: 12px;
-  height: calc(100dvh - 92px - var(--safe-t) - var(--safe-b)); min-height: 340px; max-height: 720px;
+  height: calc(100dvh - 170px - var(--safe-t) - var(--safe-b)); min-height: 340px; max-height: 680px;
 }
 .tile {
   position: relative; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px;
@@ -264,3 +264,10 @@ svg .dot { fill: var(--accent); }
 .counts b { display: flex; align-items: center; justify-content: center; gap: 5px; }
 .counts b .i { width: 16px; height: 16px; }
 .help-icons .i { width: 16px; height: 16px; vertical-align: -0.2em; }
+
+/* ---------------- Logo ---------------- */
+.brand { display: flex; align-items: center; justify-content: center; gap: 14px; margin: 6px 0 14px; }
+.brand-dog { width: 104px; height: auto; color: var(--accent); filter: drop-shadow(0 0 4px rgba(57,255,20,.85)) drop-shadow(0 0 12px rgba(57,255,20,.4)); }
+.wordmark { font-weight: 900; font-size: 30px; letter-spacing: .12em; line-height: 1; white-space: nowrap; }
+.wordmark b { color: var(--accent); text-shadow: 0 0 12px rgba(57,255,20,.45); }
+.active-plan { text-align: center; }

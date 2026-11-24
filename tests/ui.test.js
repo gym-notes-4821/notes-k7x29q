@@ -49,7 +49,8 @@ const STORE = 'trainingsapp.v1';
   const kgOf = async n => card(n).locator('input[data-f=w]').evaluateAll(els => els.map(e => e.value).join('/'));
   const repsOf = async n => card(n).locator('input[data-f=r]').evaluateAll(els => els.map(e => e.value).join('/'));
   ok(await kgOf('Latziehen') === '45/45/45' && await repsOf('Latziehen') === '//', '2 kg vom letzten Mal vorausgefüllt, Wdh. leer');
-  ok(await kgOf('Kreuzheben') === '42,5/42,5', '2 Dezimalgewicht 42,5 vorausgefüllt');
+  ok(await kgOf('Kreuzheben') === '42,5/42,5/42,5', '2 Kreuzheben mit 3 Sätzen, 42,5 vorausgefüllt');
+  ok(await kgOf('Bankdrücken mit Kurzhanteln') === '17,5/17,5/17,5' && await kgOf('Butterfly mit Kurzhanteln') === '12,5/12,5/12,5' && await kgOf('Schulterdrücken') === '7,5/7,5/7,5', '2 Kurzhanteln pro Hantel (17,5 / 12,5 / 7,5)');
   await card('Hackenschmidt').locator('.set-row').nth(0).locator('input[data-f=w]').fill('12,5');
   await card('Hackenschmidt').locator('.set-row').nth(0).locator('input[data-f=w]').blur();
   ok(await kgOf('Hackenschmidt') === '12,5/12,5/12,5', '2 Geändertes Gewicht wird an Folgesätze weitergegeben');
@@ -72,8 +73,8 @@ const STORE = 'trainingsapp.v1';
   await card('Hackenschmidt').locator('[data-act=take-all]').click();
   await card('Rudern aufrecht').locator('[data-act=take-all]').click();
   await row('Rudern aufrecht', 1).locator('input[data-f=r]').fill('11');
-  await row('Schulterdrücken', 0).locator('input[data-f=w]').fill('17,5'); await row('Schulterdrücken', 0).locator('input[data-f=r]').fill('10');
-  await row('Schulterdrücken', 1).locator('input[data-f=w]').fill('15'); await row('Schulterdrücken', 1).locator('input[data-f=r]').fill('12');
+  await row('Schulterdrücken', 0).locator('input[data-f=w]').fill('10'); await row('Schulterdrücken', 0).locator('input[data-f=r]').fill('10');
+  await row('Schulterdrücken', 1).locator('input[data-f=w]').fill('7,5'); await row('Schulterdrücken', 1).locator('input[data-f=r]').fill('12');
   await card('Bankdrücken mit Kurzhanteln').locator('[data-act=skip]').click();
 
   // 10. Supersatz A
@@ -132,8 +133,8 @@ const STORE = 'trainingsapp.v1';
 
   // Nächstes Training: kg aus dem gerade abgeschlossenen Training vorausgefüllt
   await go(''); await page.click('.tile-main'); await page.waitForSelector('.ex-card');
-  ok(await card('Schulterdrücken').locator('input[data-f=w]').evaluateAll(els => els.map(e => e.value).join('/')) === '17,5/15/15', 'Nächstes Training: kg vom letzten Training (17,5/15/15)');
-  ok(await card('Bankdrücken mit Kurzhanteln').locator('input[data-f=w]').evaluateAll(els => els.map(e => e.value).join('/')) === '35/35/35', 'Übersprungene Übung: kg vom letzten echten Eintrag');
+  ok(await card('Schulterdrücken').locator('input[data-f=w]').evaluateAll(els => els.map(e => e.value).join('/')) === '10/7,5/7,5', 'Nächstes Training: kg vom letzten Training (10/7,5/7,5)');
+  ok(await card('Bankdrücken mit Kurzhanteln').locator('input[data-f=w]').evaluateAll(els => els.map(e => e.value).join('/')) === '17,5/17,5/17,5', 'Übersprungene Übung: kg vom letzten echten Eintrag');
   ok(await ssA.locator('input[data-f=w]').nth(0).inputValue() === '12', 'Supersatz: kg vorausgefüllt');
   await go('');
   ok(await page.locator('.tile-main .hint').count() === 0 && (await store()).sessions.filter(s => s.status === 'active').length === 0, 'Unberührtes Training wird beim Verlassen verworfen');
@@ -226,7 +227,7 @@ const STORE = 'trainingsapp.v1';
   await p2.evaluate(([k, d]) => localStorage.setItem(k, JSON.stringify(d)), [STORE, v1]);
   await p2.reload(); await p2.waitForSelector('.tile');
   const d2 = await p2.evaluate(k => JSON.parse(localStorage.getItem(k)), STORE);
-  ok(err2 === 0 && d2.version === 2 && d2.sessions.some(s => s.id === 'old1'), '8 Version-1-Daten laden ohne Fehler, alte Trainings erhalten');
+  ok(err2 === 0 && d2.version === 3 && d2.sessions.some(s => s.id === 'old1'), '8 Version-1-Daten laden ohne Fehler, alte Trainings erhalten');
   await p2.goto(URL + '#/fortschritt'); await p2.waitForSelector('.prow');
   ok(await p2.locator('h2', { hasText: 'Weitere Übungen' }).count() === 1, '8 Alte Übungen bleiben als „Weitere Übungen“ erreichbar');
   await p2.goto(URL + '#/fortschritt/uebung/latziehen'); await p2.waitForSelector('.hist');

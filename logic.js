@@ -51,15 +51,15 @@ const e1rm = s => s.w * (1 + s.r / 30);
 
 /* ---------------- Standardplan & Startwerte ---------------- */
 const START_PLAN_ID = 'plan-ganzkoerper-v2';
-// [Name, Gewicht, Wiederholungen je Satz, Supersatz, pro Hantel]
+// [Name, Gewicht (bei Kurzhanteln pro Hantel), Wiederholungen je Satz (Startwerte), Supersatz, pro Hantel, Sätze im Plan]
 const START_VALUES = [
   ['Hackenschmidt', 10, [12, 12, 8], null, false],
-  ['Kreuzheben', 42.5, [12, 10], null, false],
-  ['Bankdrücken mit Kurzhanteln', 35, [12, 12, 8], null, true],
+  ['Kreuzheben', 42.5, [12, 10], null, false, 3],
+  ['Bankdrücken mit Kurzhanteln', 17.5, [12, 12, 8], null, true],
   ['Latziehen', 45, [12, 12, 10], null, false],
-  ['Butterfly mit Kurzhanteln', 25, [12, 11, 9], null, true],
+  ['Butterfly mit Kurzhanteln', 12.5, [12, 11, 9], null, true],
   ['Rudern aufrecht', 20, [12, 12, 12], null, false],
-  ['Schulterdrücken', 15, [12, 12, 10], null, true],
+  ['Schulterdrücken', 7.5, [12, 12, 10], null, true],
   ['Bizepscurls', 12, [13, 13], 'A', true],
   ['Trizeps am Turm 1', 18, [13, 13], 'A', false],
   ['Seitheben', 5, [13, 13], 'A', true],
@@ -72,7 +72,7 @@ function mkPlanEx(name, sets, guide, opts = {}) {
 function defaultPlan() {
   return {
     id: START_PLAN_ID, name: 'Ganzkörperplan',
-    exercises: START_VALUES.map(([name, w, reps, group, pd], i) => mkPlanEx(name, reps.length, w, { id: `gk-${i + 1}`, group, perDumbbell: pd })),
+    exercises: START_VALUES.map(([name, w, reps, group, pd, sets], i) => mkPlanEx(name, sets || reps.length, w, { id: `gk-${i + 1}`, group, perDumbbell: pd })),
   };
 }
 function snapshotEx(pe) {
@@ -91,12 +91,13 @@ function baselineSession(plan, date) {
 }
 function freshDb() {
   const plan = defaultPlan();
-  return { version: 2, plans: [plan], sessions: [baselineSession(plan)], activePlanId: plan.id, lastExport: null };
+  return { version: DATA_VERSION, plans: [plan], sessions: [baselineSession(plan)], activePlanId: plan.id, lastExport: null };
 }
 
 /* ---------------- Migration ---------------- */
 const validDb = d => !!d && Array.isArray(d.plans) && Array.isArray(d.sessions);
-/** Bringt Daten beliebiger älterer Version auf Version 2. Trainings bleiben vollständig erhalten. */
+const DATA_VERSION = 3;
+/** Bringt Daten beliebiger älterer Version auf die aktuelle Version. Selbst eingetragene Trainings bleiben unverändert. */
 function migrate(input) {
   if (!validDb(input)) throw new Error('Ungültiges Datenformat');
   const d = JSON.parse(JSON.stringify(input));
@@ -127,6 +128,35 @@ function migrate(input) {
     if (!d.sessions.some(s => s.kind === 'baseline' && s.planId === plan.id)) d.sessions.push(baselineSession(plan));
     d.activePlanId = plan.id;
     d.version = 2;
+  }
+  if (d.version < 3) {
+    // Version 3: Kurzhantelgewichte des Standardplans pro Hantel statt beide Hanteln zusammen,
+    // Kreuzheben mit 3 statt 2 Sätzen. Betrifft Plan, Startwerte und vorausgefüllte, noch leere Sätze.
+    const HALF = { 'bankdrücken mit kurzhanteln': [35, 17.5], 'butterfly mit kurzhanteln': [25, 12.5], 'schulterdrücken': [15, 7.5] };
+    const fix = (key, w) => (HALF[key] && w === HALF[key][0]) ? HALF[key][1] : w;
+    const plan = d.plans.find(p => p.id === START_PLAN_ID);
+    if (plan) for (const e of plan.exercises) {
+      const k = normKey(e.name);
+      e.guide = fix(k, e.guide);
+      if (k === 'kreuzheben' && e.sets === 2) e.sets = 3;
+    }
+    for (const s of d.sessions) {
+      if (s.planId !== START_PLAN_ID) continue;
+      if (s.kind === 'baseline') {
+        for (const ex of s.exercises) { ex.guide = fix(ex.key, ex.guide); ex.sets.forEach(x => { x.w = fix(ex.key, x.w); }); }
+      } else if (s.status === 'active') {
+        const wasUntouched = s.prefill && isUntouched(s);
+        for (const ex of s.exercises) {
+          ex.guide = fix(ex.key, ex.guide);
+          ex.sets.forEach(x => { if (x.r == null) x.w = fix(ex.key, x.w); });
+          if (ex.key === 'kreuzheben' && ex.sets.length === 2) {
+            ex.sets.push({ w: ex.sets[1].w, r: null }); ex.targetSets = 3;
+          }
+        }
+        if (wasUntouched) s.prefill = weightSignature(s);
+      }
+    }
+    d.version = 3;
   }
   if (!d.plans.some(p => p.id === d.activePlanId)) d.activePlanId = d.plans[0] ? d.plans[0].id : null;
   return d;
@@ -375,7 +405,7 @@ function normalizeGroups(plan) {
 
 const api = {
   uid, normKey, round2, round1, pad, todayISO, dayNum, addDaysISO, parseNum, parseInt0, fmtNum, fmtSet, fmtSets, fmtPct, fmtDate, repWord, e1rm,
-  START_PLAN_ID, START_VALUES, mkPlanEx, defaultPlan, snapshotEx, newSession, baselineSession, freshDb, validDb, migrate,
+  START_PLAN_ID, START_VALUES, DATA_VERSION, mkPlanEx, defaultPlan, snapshotEx, newSession, baselineSession, freshDb, validDb, migrate,
   setDb, getDb, sessionOrder, doneSessions, isValidSet, validSets, bestE1, bestSetByE1, exerciseHistory, previousEntry,
   rankSets, cmpPair, compareSets, diffText, explain, trendFor, analyzeExercise, latestProgress, planProgress,
   forecastFor, forecastText, planForecast, blocks, normalizeGroups, MAX_WEEKLY, prefillWeights, isUntouched,

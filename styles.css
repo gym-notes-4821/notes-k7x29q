@@ -574,3 +574,29 @@ svg .fline { fill: none; }
 .ci-pain { color: var(--bad) !important; }
 .cc-warn { font-size: 14px; font-weight: 700; color: var(--bad); background: rgba(255,77,77,.1); border-radius: 10px; padding: 8px 10px; margin: 0 0 8px; }
 .cc-patterns { display: grid; gap: 10px; }
+
+/* ---------------- Profil ---------------- */
+.home { position: relative; }
+.profile-btn { position: absolute; top: calc(10px + var(--safe-t)); right: 0; width: 44px; height: 44px; border-radius: 50%; display: grid; place-items: center;
+  background: var(--card2); color: var(--text); border: 1px solid var(--line); }
+.profile-btn .i { width: 22px; height: 22px; }
+.brand { padding-right: 46px; padding-left: 0; }
+.prof .flabel { display: block; font-size: 15px; color: var(--muted); margin-bottom: 6px; }
+.prof .row input { flex: 1; min-width: 0; }
+.prof .row .btn-primary { flex: none; white-space: nowrap; }
+.prof-seg { grid-template-columns: 1fr 1fr; }
+.prof-seg button { font-size: 15px; }
+.prof-body { display: grid; gap: 8px; }
+.prof-body button { flex-direction: column; align-items: flex-start; text-align: left; gap: 0; min-height: 56px; background: var(--card2); border: 2px solid transparent; }
+.prof-body button small { color: var(--muted); font-weight: 500; font-size: 13px; }
+.prof-body button.on { border-color: var(--accent); background: rgba(57,255,20,.1); }
+.prof-body button.on b { color: var(--accent); }
+.w-list { padding: 4px 14px; }
+.w-row { display: flex; align-items: center; gap: 10px; padding: 8px 0; border-top: 1px solid var(--line); }
+.w-row:first-child { border-top: 0; }
+.w-row span { flex: 1; color: var(--muted); font-size: 15px; }
+.prof-hint { gap: 12px; align-items: center; border: 1px dashed rgba(57,255,20,.45); }
+.prof-hint > .i { width: 26px; height: 26px; color: var(--accent); flex: none; }
+.prof-hint small { display: block; color: var(--muted); font-size: 13px; }
+.prof .field { margin-bottom: 16px; }
+.prof .field:last-child { margin-bottom: 4px; }

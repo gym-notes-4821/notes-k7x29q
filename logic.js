@@ -126,7 +126,7 @@ function baselineSession(plan, date) {
 }
 function freshDb() {
   const plan = defaultPlan();
-  return { version: DATA_VERSION, plans: [plan], sessions: [baselineSession(plan)], activePlanId: plan.id, lastExport: null, settings: { sound: true, weeklyGoal: 3, maxTestEvery: 28 }, notes: {}, maxTests: [] };
+  return { version: DATA_VERSION, plans: [plan], sessions: [baselineSession(plan)], activePlanId: plan.id, lastExport: null, settings: { sound: true, weeklyGoal: 3, maxTestEvery: 28 }, notes: {}, maxTests: [], profile: {}, weights: [] };
 }
 
 /* ---------------- Migration ---------------- */
@@ -175,7 +175,7 @@ function renameInStartPlan(d, oldName, newName) {
   }
 }
 const validDb = d => !!d && Array.isArray(d.plans) && Array.isArray(d.sessions);
-const DATA_VERSION = 12;
+const DATA_VERSION = 13;
 /** Bringt Daten beliebiger älterer Version auf die aktuelle Version. Selbst eingetragene Trainings bleiben unverändert. */
 function migrate(input) {
   if (!validDb(input)) throw new Error('Ungültiges Datenformat');
@@ -332,6 +332,12 @@ function migrate(input) {
     d.maxTests = d.maxTests || [];
     d.settings = Object.assign({ maxTestEvery: 28 }, d.settings);
     d.version = 12;
+  }
+  if (d.version < 13) {
+    // Version 13: Profil (Größe, Alter, Erfahrung, Körpertyp) und Gewichtsverlauf
+    d.profile = d.profile || {};
+    d.weights = d.weights || [];
+    d.version = 13;
   }
   if (!d.plans.some(p => p.id === d.activePlanId)) d.activePlanId = d.plans[0] ? d.plans[0].id : null;
   return d;
@@ -526,6 +532,57 @@ function planProgress(plan) {
   return { points, ref, cur };
 }
 
+/* ---------------- Profil ---------------- */
+const EXPERIENCE = [['lt6', 'unter 6 Monate', 0.01], ['6to12', '6–12 Monate', 0.01], ['1to3', '1–3 Jahre', 0.005], ['gt3', 'über 3 Jahre', 0.0025]];
+const BODY_TYPES = [
+  ['slim', 'eher schlank', 'nimmt schwer zu, lange Gliedmaßen'],
+  ['athletic', 'athletisch', 'baut leicht Muskeln auf'],
+  ['stocky', 'eher kräftig', 'nimmt leicht zu, breiter Körperbau'],
+];
+/** Höchstes realistisches Plus pro Woche für die Prognose – abhängig von der Trainingserfahrung (ohne Angabe: 1 %). */
+function weeklyCap() {
+  const e = db && db.profile && db.profile.experience;
+  const hit = EXPERIENCE.find(([id]) => id === e);
+  return hit ? hit[2] : MAX_WEEKLY;
+}
+/** Alter heute: Angabe plus seitdem vergangene volle Jahre. */
+function currentAge(p, refISO = todayISO()) {
+  if (!p || !p.age) return null;
+  if (!p.ageSetAt) return p.age;
+  return p.age + Math.floor((dayNum(refISO) - dayNum(p.ageSetAt)) / 365.25);
+}
+const latestWeight = () => { const w = ((db && db.weights) || []).slice().sort((a, b) => a.date < b.date ? -1 : 1); return w[w.length - 1] || null; };
+/** Gewicht für ein Datum eintragen (gleicher Tag wird ersetzt). */
+function logWeight(date, kg) {
+  db.weights = (db.weights || []).filter(x => x.date !== date);
+  if (kg != null && !Number.isNaN(kg)) db.weights.push({ date, kg });
+  db.weights.sort((a, b) => a.date < b.date ? -1 : 1);
+}
+const bmi = (cm, kg) => cm && kg ? round1(kg / ((cm / 100) ** 2)) : null;
+/** Gewichtstrend der letzten ~5 Wochen in kg pro Woche (ab 2 Einträgen mit mind. 7 Tagen Abstand). */
+function weightTrend(refISO = todayISO()) {
+  const w = ((db && db.weights) || []).filter(x => dayNum(refISO) - dayNum(x.date) <= 35).sort((a, b) => a.date < b.date ? -1 : 1);
+  if (w.length < 2) return null;
+  const span = dayNum(w[w.length - 1].date) - dayNum(w[0].date);
+  if (span < 7) return null;
+  const perWeek = round1((w[w.length - 1].kg - w[0].kg) / span * 7 * 10) / 10;
+  return { perWeek, dir: perWeek <= -0.1 ? 'down' : perWeek >= 0.1 ? 'up' : 'flat', from: w[0], to: w[w.length - 1] };
+}
+/** Hinweise des Coachs aus dem Profil. */
+function profileHints() {
+  const p = (db && db.profile) || {}, out = [], wt = weightTrend(), lw = latestWeight();
+  const exp = EXPERIENCE.find(([id]) => id === p.experience);
+  if (exp) out.push({ kind: 'exp', text: exp[0] === 'lt6' || exp[0] === '6to12'
+    ? `Trainingserfahrung ${exp[1]}: Jetzt geht es am schnellsten – bis etwa +1 % pro Woche sind realistisch.`
+    : `Trainingserfahrung ${exp[1]}: Fortschritt kommt langsamer – etwa +${String(exp[2] * 100).replace('.', ',')} % pro Woche sind schon gut.` });
+  if (wt && wt.dir === 'down') out.push({ kind: 'weight', text: `Dein Gewicht sinkt (${String(wt.perWeek).replace('.', ',')} kg/Woche). In dieser Phase ist Kraft halten schon ein Erfolg – Stagnation ist normal.` });
+  if (wt && wt.dir === 'up') out.push({ kind: 'weight', text: `Dein Gewicht steigt (+${String(wt.perWeek).replace('.', ',')} kg/Woche). Gute Phase für Kraftzuwächse – achte auf genug Eiweiß.` });
+  if (p.bodyType === 'slim') out.push({ kind: 'body', text: 'Eher schlank: Ausreichend essen ist für Muskelaufbau oft der Schlüssel – ein leichter Kalorienüberschuss hilft.' });
+  if (p.bodyType === 'stocky') out.push({ kind: 'body', text: 'Eher kräftig: Gute Voraussetzungen für Kraft – Ernährung im Blick behalten, wenn du Fett verlieren willst.' });
+  const b = bmi(p.height, lw && lw.kg);
+  return { hints: out, bmi: b, weight: lw, trend: wt, age: currentAge(p), empty: !p.height && !p.age && !lw && !p.experience && !p.bodyType };
+}
+
 /* ---------------- Prognose ---------------- */
 const MAX_WEEKLY = 0.01;   // höchstens +1 % pro Woche zu Beginn …
 const TAU_WEEKS = 12;      // … und mit der Zeit abflachend (Zeitkonstante 12 Wochen)
@@ -544,7 +601,7 @@ function forecastFor(key, days, perDumbbell) {
   if (sxx === 0) return { status: 'few', n: h.length, text: 'Für eine Prognose brauche ich Trainings an mindestens zwei verschiedenen Tagen.' };
   const slope = pts.reduce((a, p) => a + (p.x - mx) * (p.y - my), 0) / sxx; // kg 1RM pro Tag
   const last = h[h.length - 1], ref = bestSetByE1(last.sets), e0 = e1rm(ref);
-  const cap = e0 * MAX_WEEKLY / 7;
+  const cap = e0 * weeklyCap() / 7;
   const used = slope <= 0 ? 0 : Math.min(slope, cap);
   const eF = e0 + used * 7 * effWeeks(days);
   const step = perDumbbell ? 1 : 2.5;
@@ -552,7 +609,7 @@ function forecastFor(key, days, perDumbbell) {
   if (used > 0) w = Math.max(ref.w, Math.round((eF / (1 + ref.r / 30)) / step) * step);
   const status = used > 0 ? 'up' : 'flat';
   const weeklyPct = slope * 7 / e0 * 100;
-  return { status, n: h.length, slope, used, capped: slope > cap, weeklyPct, usedWeeklyPct: used * 7 / e0 * 100,
+  return { status, n: h.length, slope, used, cap: weeklyCap(), capped: slope > cap, weeklyPct, usedWeeklyPct: used * 7 / e0 * 100,
     e0, eF, at: d => e0 + used * 7 * effWeeks(d), pct: (eF / e0 - 1) * 100, w, r: ref.r, today: ref, lastDate: last.session.date, points: pts };
 }
 function forecastText(name, f, days) {
@@ -1088,6 +1145,7 @@ const api = {
   ALTERNATIVES, alternativesFor, exerciseState, coachReport, estimateMinutes, swapExercise, coachTips,
   FEELS, recentFeels, feelHint, dayFeel,
   musclesInSession, recentCheckins, pumpStats, checkinTrend, pumpTip, muscleName,
+  EXPERIENCE, BODY_TYPES, weeklyCap, currentAge, latestWeight, logWeight, bmi, weightTrend, profileHints,
   PAIN_AREAS, painName, painExercises, painReport, timeOfDay, sessionScore, contextPatterns, patternText, CONTEXT,
   maxCategory, maxRestBefore, MAX_REPS, currentE1, maxTestPlan, maxTestState, newMaxTest, maxTestHistory, maxTestDue, MUSCLES, musclesOf, planMuscleLoad, muscleLevel, prefillWeights, isUntouched,
 };

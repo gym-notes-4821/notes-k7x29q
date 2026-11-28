@@ -60,6 +60,7 @@ const ICON_PATHS = {
   faceOk: '<circle cx="12" cy="12" r="9"/><path d="M8.5 15.3h7"/><path d="M9 9.6v.6M15 9.6v.6" stroke-width="2.6"/>',
   faceBad: '<circle cx="12" cy="12" r="9"/><path d="M7.8 16.8c1.1-1.8 2.5-2.6 4.2-2.6s3.1.8 4.2 2.6"/><path d="M9 9.6v.6M15 9.6v.6" stroke-width="2.6"/>',
   bolt: '<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>',
+  user: '<circle cx="12" cy="8.5" r="4"/><path d="M4.5 20c1.2-3.6 4-5.5 7.5-5.5s6.3 1.9 7.5 5.5"/>',
   coach: '<path d="M4 5h16v11H9.5L5 20v-4H4z"/><path d="M8.5 10.5l2.5 2.5 4.5-4.5"/>',
   swap: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
@@ -370,6 +371,7 @@ const routes = [
   [/^#\/fortschritt\/uebung\/([^/]+)$/, key => viewExercise(key, false)],
   [/^#\/ausblick$/, viewOutlook],
   [/^#\/coach$/, viewCoach],
+  [/^#\/profil$/, viewProfile],
   [/^#\/maxkraft$/, viewMax],
   [/^#\/maxkraft\/test\/([^/]+)$/, viewMaxTest],
   [/^#\/ausblick\/uebung\/([^/]+)$/, key => viewExercise(key, true)],
@@ -404,6 +406,7 @@ function viewHome() {
   const plan = activePlan(), run = activeSession();
   return `<div class="home">
     <header class="brand" aria-label="Gym Notes">${DACKEL}<span class="wordmark">GYM <b>NOTES</b></span></header>
+    <a class="profile-btn" href="#/profil" aria-label="Profil">${icon('user')}</a>
     <p class="active-plan">Aktiver Plan: <b>${plan ? esc(plan.name) : 'keiner'}</b></p>
     ${weekLine()}
     <div class="tiles">
@@ -675,7 +678,7 @@ const PERIODS = [[30, '1 Monat'], [91, '3 Monate'], [182, '6 Monate']];
 function periodSeg() {
   return `<div class="seg seg3">${PERIODS.map(([d, l]) => `<button class="${d === outlookDays ? 'on' : ''}" data-act="period" data-d="${d}">${l}</button>`).join('')}</div>`;
 }
-const outlookNote = '<p class="note">Grobe Schätzung: Die App rechnet mit höchstens +1 % pro Woche und lässt das Tempo mit der Zeit abflachen – so wie Fortschritt meist verläuft.</p>';
+const outlookNoteHTML = () => `<p class="note">Grobe Schätzung: Die App rechnet mit höchstens ${fmtPct(L.weeklyCap() * 100)} pro Woche${db.profile && db.profile.experience ? ' (passend zu deiner Trainingserfahrung)' : ''} und lässt das Tempo mit der Zeit abflachen – so wie Fortschritt meist verläuft.</p>`;
 /** Stützstellen für die Prognosekurve (ca. alle 2 Wochen bis zum Ende des Zeitraums). */
 const curveDays = days => { const n = Math.max(2, Math.round(days / 14)); return Array.from({ length: n }, (_, k) => Math.round(days * (k + 1) / n)); };
 function viewOutlook() {
@@ -685,7 +688,7 @@ function viewOutlook() {
   const pf = planForecast(plan, outlookDays);
   const pts = pf.prog.points;
   const lastD = pts.length ? pts[pts.length - 1].d : todayISO();
-  h += `<p class="muted small">Plan: <b>${esc(plan.name)}</b></p>${periodSeg()}${outlookNote}
+  h += `<p class="muted small">Plan: <b>${esc(plan.name)}</b></p>${periodSeg()}${outlookNoteHTML()}
     <div class="chart-wrap"><div class="chart-title"><span>Gesamtprognose</span><b class="${pf.pct > 0.05 ? 'c-up' : ''}">${pf.pct == null ? '–' : fmtPct(pf.pct)}</b></div>
     <p class="chart-note" style="margin-top:0">${pf.pct == null ? 'Für eine Prognose brauche ich mindestens 3 Trainings.' : `Durchschnitt aus ${pf.count} Übungen in ${PERIODS.find(p => p[0] === outlookDays)[1]} gegenüber heute.`}</p>
     ${lineChart({ points: pts, curve: pf.pct == null || pf.endY == null ? null : curveDays(outlookDays).map(t => ({ d: addDaysISO(lastD, t), y: pf.at(t) })), unit: '%', timeScale: true, zero: true })}
@@ -694,7 +697,7 @@ function viewOutlook() {
     const x = pf.per.find(p => p.e === ex), f = x.f;
     const st = f.status === 'few' ? 'ffew' : f.status === 'flat' ? 'fflat' : 'fup';
     let meta = '';
-    if (f.status !== 'few') meta = esc(`Trend ${fmtPct(f.weeklyPct)} pro Woche${f.capped ? ` – gedeckelt auf ${fmtPct(L.MAX_WEEKLY * 100)}, abflachend` : ''} · Basis: ${f.n} Trainings`);
+    if (f.status !== 'few') meta = esc(`Trend ${fmtPct(f.weeklyPct)} pro Woche${f.capped ? ` – gedeckelt auf ${fmtPct(f.cap * 100)}, abflachend` : ''} · Basis: ${f.n} Trainings`);
     const text = f.status === 'few' ? f.text : forecastText(ex.name, f, outlookDays).replace(`${ex.name}: `, '');
     return statusRow({ st, name: ex.name, text, meta, href: `#/ausblick/uebung/${encodeURIComponent(x.key)}`, perDumbbell: ex.perDumbbell });
   });
@@ -768,6 +771,9 @@ function viewCoach() {
   }
   const ready = r.exercises.filter(x => x.feel && x.feel.type === 'ready' && !x.issue);
   if (ready.length) h += `<h2>Bereit für mehr</h2><div class="card cc-ready">${ready.map(x => `<a href="#/fortschritt/uebung/${encodeURIComponent(x.key)}">${icon('faceGood')}<span><b>${esc(x.name)}</b><small>2× in Folge „gut“ – ${x.feel.more === 'weight' ? 'nächstes Mal eine Gewichtsstufe höher' : 'mehr Wiederholungen anpeilen'}</small></span></a>`).join('')}</div>`;
+  const ph = L.profileHints();
+  if (ph.empty) h += `<a class="card link row prof-hint" href="#/profil">${icon('user')}<span class="spacer"><b>Profil ausfüllen</b><small>Größe, Alter, Gewicht, Erfahrung und Körpertyp – dann kann ich dich besser einschätzen.</small></span><span class="muted">›</span></a>`;
+  else if (ph.hints.length) h += `<h2>Passend zu dir</h2><div class="card cc-checks">${ph.hints.map(x => `<div class="cc-check ok">${icon('user')}<span><b>${esc(x.text)}</b></span></div>`).join('')}</div>`;
   const pat = L.contextPatterns();
   if (pat.checkins) {
     h += `<h2>Deine Muster</h2><div class="card cc-patterns">${pat.patterns.length
@@ -893,6 +899,34 @@ function viewMaxTest(id) {
 }
 const roundStepUI = (w, step) => Math.round(w / step) * step;
 
+/* ---------------- Profil ---------------- */
+function viewProfile() {
+  const p = db.profile || {}, ph = L.profileHints(), lw = ph.weight;
+  let h = topbar('Profil');
+  h += `<p class="muted small">Deine Basisdaten helfen dem Coach, dich richtig einzuschätzen. Sie bleiben nur auf diesem Gerät.</p>
+    <div class="card prof">
+      <div class="grid2"><label class="field"><span>Größe (cm)</span><input data-prof="height" inputmode="numeric" pattern="[0-9]*" value="${p.height ?? ''}" placeholder="z. B. 180"></label>
+      <label class="field"><span>Alter</span><input data-prof="age" inputmode="numeric" pattern="[0-9]*" value="${ph.age ?? ''}" placeholder="z. B. 35"></label></div>
+      <div class="field"><span class="flabel">Gewicht (kg)</span><div class="row"><input id="prof-weight" inputmode="decimal" value="" placeholder="${lw ? fmtNum(lw.kg) : 'z. B. 80'}" aria-label="Gewicht heute">
+        <button class="btn-primary" data-act="prof-weight">Heute eintragen</button></div>
+        ${lw ? `<p class="muted small" style="margin-top:6px">Zuletzt: <b>${fmtNum(lw.kg)} kg</b> am ${fmtDate(lw.date, 'tiny')}${ph.trend ? ` · Trend ${ph.trend.perWeek > 0 ? '+' : ''}${fmtNum(ph.trend.perWeek)} kg/Woche` : ''}</p>` : ''}</div>
+      <div class="field"><span class="flabel">Trainingserfahrung</span><div class="ci-seg prof-seg">${L.EXPERIENCE.map(([id, l]) => `<button class="${p.experience === id ? 'on' : ''}" data-act="prof-set" data-k="experience" data-v="${id}">${l}</button>`).join('')}</div></div>
+      <div class="field"><span class="flabel">Körpertyp</span><div class="prof-body">${L.BODY_TYPES.map(([id, l, d]) => `<button class="${p.bodyType === id ? 'on' : ''}" data-act="prof-set" data-k="bodyType" data-v="${id}"><b>${l}</b><small>${d}</small></button>`).join('')}</div>
+        <p class="muted small" style="margin-top:6px">Nur eine grobe Orientierung – die meisten Menschen sind eine Mischung.</p></div>
+    </div>`;
+  const ws = (db.weights || []).slice().sort((a, b) => a.date < b.date ? -1 : 1);
+  if (ws.length) {
+    h += `<h2>Gewichtsverlauf</h2><div class="chart-wrap"><div class="chart-title"><span>Körpergewicht (kg)</span><b>${fmtNum(lw.kg)} kg</b></div>
+      ${lineChart({ points: ws.slice(-20).map(w => ({ d: w.date, y: w.kg })), unit: 'kg', timeScale: true })}</div>
+      <div class="card w-list">${ws.slice(-8).reverse().map(w => `<div class="w-row"><span>${fmtDate(w.date, 'long')}</span><b>${fmtNum(w.kg)} kg</b><button class="icon-btn" data-act="prof-wdel" data-date="${w.date}" aria-label="Eintrag löschen">✕</button></div>`).join('')}</div>`;
+  }
+  const facts = [];
+  if (ph.bmi) facts.push(`<div class="cc-check info">${icon('stNone')}<span><b>BMI ${fmtNum(ph.bmi)}</b><small>Grobe Kennzahl aus Größe und Gewicht – Muskeln werden dabei nicht berücksichtigt.</small></span></div>`);
+  for (const x of ph.hints) facts.push(`<div class="cc-check ok">${icon('coach')}<span><b>${esc(x.text)}</b></span></div>`);
+  if (facts.length) h += `<h2>Was der Coach daraus ableitet</h2><div class="card cc-checks">${facts.join('')}</div>`;
+  return h;
+}
+
 /* ---------------- Übungsdetail ---------------- */
 const chartMode = {};
 function viewExercise(key, outlook) {
@@ -913,13 +947,13 @@ function viewExercise(key, outlook) {
   }
   if (outlook) {
     const f = forecastFor(key, outlookDays, perDumbbell);
-    h += periodSeg() + outlookNote;
+    h += periodSeg() + outlookNoteHTML();
     const pts = hist.map(e => ({ d: e.session.date, y: bestE1(e.sets) }));
     h += `<div class="chart-wrap"><div class="chart-title"><span>Geschätztes Maximalgewicht (kg)</span></div>
       ${lineChart({ points: pts, timeScale: true, unit: 'kg', curve: f.status === 'few' ? null : curveDays(outlookDays).map(t => ({ d: addDaysISO(f.lastDate, t), y: f.at(t) })) })}
       <p class="chart-note">durchgezogen: bisher · gestrichelt: Prognose</p></div>
       <div class="card"><b>${esc(forecastText(name, f, outlookDays))}</b>
-      ${f.status !== 'few' ? `<p class="muted small">Trend der letzten ${f.n} Trainings: ${fmtPct(f.weeklyPct)} pro Woche${f.capped ? `, gedeckelt auf ${fmtPct(L.MAX_WEEKLY * 100)} und mit der Zeit abflachend` : ''}${f.status === 'flat' ? ' – aktuell kein Anstieg, daher keine sinkende Prognose' : ''}. Gerundet auf ${perDumbbell ? '1 kg' : '2,5 kg'}.</p>` : ''}</div>`;
+      ${f.status !== 'few' ? `<p class="muted small">Trend der letzten ${f.n} Trainings: ${fmtPct(f.weeklyPct)} pro Woche${f.capped ? `, gedeckelt auf ${fmtPct(f.cap * 100)} und mit der Zeit abflachend` : ''}${f.status === 'flat' ? ' – aktuell kein Anstieg, daher keine sinkende Prognose' : ''}. Gerundet auf ${perDumbbell ? '1 kg' : '2,5 kg'}.</p>` : ''}</div>`;
   } else {
     const weights = [...new Set(hist.flatMap(e => e.sets.map(s => s.w)))].sort((a, b) => a - b);
     let mode = chartMode[key] ?? '1rm';
@@ -1085,6 +1119,12 @@ $app.addEventListener('input', ev => {
     if (t.dataset.f === 'r' && v != null && !Number.isNaN(v) && (t.value.length >= 2 || v >= 4)) focusNext(t);
     return;
   }
+  if (t.dataset.prof) {
+    const v = parseInt0(t.value), k = t.dataset.prof, ok = v == null || (!Number.isNaN(v) && (k === 'height' ? v >= 100 && v <= 250 : v >= 10 && v <= 100));
+    t.classList.toggle('invalid', !ok && t.value.length >= (k === 'height' ? 3 : 2));
+    if (ok) { db.profile = db.profile || {}; db.profile[k] = v ?? undefined; if (k === 'age') db.profile.ageSetAt = v ? todayISO() : undefined; save(); }
+    return;
+  }
   if (t.dataset.note != null) { L.setNote(t.dataset.note, t.value); save(); return; }
   if (t.dataset.slotNote != null) { L.setNote(t.dataset.slotNote, t.value); save(); return; }
   const p = currentPlan(); if (!p) return;
@@ -1226,6 +1266,13 @@ $app.addEventListener('click', ev => {
       }
       save(); rerenderKeepScroll(); return;
     }
+    case 'prof-set': { const k = b.dataset.k, v = b.dataset.v; db.profile = db.profile || {}; db.profile[k] = db.profile[k] === v ? undefined : v; save(); rerenderKeepScroll(); break; }
+    case 'prof-weight': {
+      const el = document.getElementById('prof-weight'), v = parseNum(el.value);
+      if (v == null || Number.isNaN(v) || v < 30 || v > 300) { el.classList.add('invalid'); toast('Bitte ein Gewicht zwischen 30 und 300 kg eingeben'); return; }
+      L.logWeight(todayISO(), v); save(); rerenderKeepScroll(); toast(`${fmtNum(v)} kg gespeichert`); break;
+    }
+    case 'prof-wdel': if (!confirm('Diesen Gewichtseintrag löschen?')) return; L.logWeight(b.dataset.date, null); save(); rerenderKeepScroll(); break;
     case 'feel': {
       const v = b.dataset.v; ex.feel = ex.feel === v ? undefined : v; save(); refreshFeel(s, +b.dataset.ex);
       if (ex.feel) toast(`${ex.name}: ${FEEL_UI[v][1]}`);

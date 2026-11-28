@@ -375,6 +375,34 @@ const STORE = 'trainingsapp.v1';
   ok(err4 === 0, 'Maximalkraft: keine Fehler');
   await ctx4.close();
 
+  // Profil
+  const ctx5 = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const p5 = await ctx5.newPage(); p5.on('dialog', d => d.accept());
+  let err5 = 0; p5.on('pageerror', e => { console.log('PAGEERROR', e.message); err5++; });
+  await p5.goto(URL); await p5.evaluate(() => localStorage.clear()); await p5.reload(); await p5.waitForSelector('.tile');
+  await p5.goto(URL + '#/coach'); await p5.waitForSelector('.coach-hero');
+  ok(await p5.locator('.prof-hint').count() === 1, 'Coach erinnert an leeres Profil');
+  await p5.goto(URL); await p5.click('.profile-btn'); await p5.waitForSelector('.prof');
+  await p5.fill('[data-prof=height]', '180'); await p5.fill('[data-prof=age]', '35');
+  await p5.fill('#prof-weight', '81,5'); await p5.click('[data-act=prof-weight]'); await p5.waitForTimeout(100);
+  await p5.click('[data-act=prof-set][data-k=experience][data-v="1to3"]');
+  await p5.click('[data-act=prof-set][data-k=bodyType][data-v=athletic]');
+  const d5 = await p5.evaluate(k => JSON.parse(localStorage.getItem(k)), STORE);
+  ok(d5.profile.height === 180 && d5.profile.age === 35 && d5.profile.experience === '1to3' && d5.profile.bodyType === 'athletic' && d5.weights.length === 1 && d5.weights[0].kg === 81.5, 'Profil gespeichert (Größe, Alter, Gewicht, Erfahrung, Körpertyp)');
+  ok((await p5.locator('.cc-checks').innerText()).includes('BMI 25,2'), 'Profil: BMI berechnet');
+  ok(await p5.locator('.w-row').count() === 1 && await p5.locator('.chart-wrap svg').count() === 1, 'Profil: Gewichtsverlauf mit Grafik');
+  await p5.reload(); await p5.waitForSelector('.prof');
+  ok(await p5.locator('[data-prof=height]').inputValue() === '180' && await p5.locator('.prof-body button.on').innerText().then(t => t.includes('athletisch')), 'Profil übersteht Neuladen');
+  await p5.goto(URL + '#/ausblick'); await p5.waitForSelector('.note');
+  ok((await p5.locator('.note').innerText()).includes('+0,5 %') && (await p5.locator('.note').innerText()).includes('Trainingserfahrung'), 'Ausblick: Deckelung passend zur Erfahrung (0,5 %)');
+  await p5.goto(URL + '#/coach'); await p5.waitForSelector('.coach-hero');
+  ok(await p5.locator('.prof-hint').count() === 0 && (await p5.locator('.coach-hero ~ .cc-checks, h2 + .cc-checks').first().innerText()).includes('Trainingserfahrung 1–3 Jahre'), 'Coach: Hinweis passend zur Erfahrung');
+  await p5.goto(URL + '#/profil'); await p5.click('[data-act=prof-wdel]'); await p5.waitForTimeout(100);
+  ok(await p5.locator('.w-row').count() === 0, 'Gewichtseintrag löschen');
+  for (const h of ['', '#/profil']) { await p5.goto(URL + h); await p5.waitForTimeout(150); ok(await p5.evaluate(() => document.documentElement.scrollWidth) <= 390, 'Keine Überbreite ' + (h || 'Start (mit Profil-Button)')); }
+  ok(err5 === 0, 'Profil: keine Fehler');
+  await ctx5.close();
+
   // 8. Migration Version 1 in frischem Kontext
   const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });
   const p2 = await ctx2.newPage();
@@ -384,7 +412,7 @@ const STORE = 'trainingsapp.v1';
   await p2.evaluate(([k, d]) => localStorage.setItem(k, JSON.stringify(d)), [STORE, v1]);
   await p2.reload(); await p2.waitForSelector('.tile');
   const d2 = await p2.evaluate(k => JSON.parse(localStorage.getItem(k)), STORE);
-  ok(err2 === 0 && d2.version === 12 && d2.sessions.some(s => s.id === 'old1'), '8 Version-1-Daten laden ohne Fehler, alte Trainings erhalten');
+  ok(err2 === 0 && d2.version === 13 && d2.sessions.some(s => s.id === 'old1'), '8 Version-1-Daten laden ohne Fehler, alte Trainings erhalten');
   await p2.goto(URL + '#/fortschritt'); await p2.waitForSelector('.prow');
   ok(await p2.locator('h2', { hasText: 'Weitere Übungen' }).count() === 1, '8 Alte Übungen bleiben als „Weitere Übungen“ erreichbar');
   await p2.goto(URL + '#/fortschritt/uebung/latziehen'); await p2.waitForSelector('.hist');

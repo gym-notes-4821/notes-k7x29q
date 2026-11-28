@@ -437,6 +437,32 @@ test('Check-in: Zwicken mit belasteten Übungen, Uhrzeit, Muster nach Schlaf/Uhr
   assert.strictEqual(L.patternText(time), 'Abends bist du im Schnitt stärker als morgens.');
   assert.ok(!pat.patterns.some(p => p.dim === 'ate'), 'immer gegessen → kein Vergleich möglich');
 });
+test('Profil: Erfahrung steuert die Prognose, Alter zählt weiter, Gewichtsverlauf und Hinweise', () => {
+  const db = L.freshDb(); L.setDb(db);
+  assert.strictEqual(L.weeklyCap(), 0.01, 'ohne Angabe: 1 %');
+  db.profile.experience = '1to3'; assert.strictEqual(L.weeklyCap(), 0.005);
+  db.profile.experience = 'gt3'; assert.strictEqual(L.weeklyCap(), 0.0025);
+  // Prognose wird mit der Erfahrung gedeckelt
+  db.sessions[0].date = L.addDaysISO(today, -14);
+  addTraining(db, L.addDaysISO(today, -7), { 'Latziehen': [[55, 12], [55, 12], [55, 12]] });
+  addTraining(db, today, { 'Latziehen': [[65, 12], [65, 12], [65, 12]] });
+  const f = L.forecastFor('latziehen', 182, false);
+  assert.ok(f.capped && Math.abs(f.usedWeeklyPct - 0.25) < 1e-9 && f.cap === 0.0025);
+  assert.strictEqual(L.currentAge({ age: 35, ageSetAt: L.addDaysISO(today, -800) }, today), 37);
+  assert.strictEqual(L.currentAge({ age: 35, ageSetAt: today }, today), 35);
+  assert.strictEqual(L.bmi(180, 81), 25);
+  L.logWeight(L.addDaysISO(today, -21), 82); L.logWeight(L.addDaysISO(today, -14), 81.5); L.logWeight(today, 80.5); L.logWeight(today, 80.4);
+  assert.strictEqual(db.weights.length, 3, 'gleicher Tag wird ersetzt');
+  assert.strictEqual(L.latestWeight().kg, 80.4);
+  const wt = L.weightTrend(today);
+  assert.strictEqual(wt.dir, 'down'); assert.ok(wt.perWeek < -0.4 && wt.perWeek > -0.6, String(wt.perWeek));
+  db.profile.bodyType = 'slim'; db.profile.height = 180; db.profile.experience = 'lt6';
+  const ph = L.profileHints();
+  assert.ok(!ph.empty && ph.bmi === 24.8);
+  assert.deepStrictEqual(ph.hints.map(x => x.kind), ['exp', 'weight', 'body']);
+  assert.ok(ph.hints[1].text.includes('Kraft halten schon ein Erfolg'));
+  db.profile = {}; db.weights = []; assert.ok(L.profileHints().empty);
+});
 const v1 = require('./v1-sample.json'); // Daten im alten Format (Version 1)
 test('Migration: Version 1 lädt ohne Fehler, Trainings bleiben erhalten', () => {
   const d = L.migrate(v1); L.setDb(d);

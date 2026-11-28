@@ -808,7 +808,7 @@ function viewCoach() {
   h += `<h2>Plan-Check</h2><div class="card cc-checks">${checks.map(([ok, t, d]) => `<div class="cc-check ${ok === true ? 'ok' : ok === false ? 'warn' : 'info'}">${icon(ok === true ? 'check' : ok === false ? 'alert' : 'stNone')}<span><b>${esc(t)}</b><small>${esc(d)}</small></span></div>`).join('')}</div>`;
   const few = r.exercises.filter(x => x.state === 'few');
   if (few.length && rated) h += `<p class="muted small" style="margin-top:12px">Noch zu wenig Daten (unter 4 Trainings): ${few.map(x => esc(x.name)).join(', ')}</p>`;
-  h += '<p class="muted small">Der Coach gibt allgemeine Trainingshinweise auf Basis deiner Einträge – keine medizinische Beratung.</p>';
+  h += '<p class="muted small">Alle Hinweise sind allgemeine Trainingstipps auf Basis deiner Einträge – keine medizinische Beratung.</p>';
   return h;
 }
 
@@ -849,7 +849,7 @@ function viewMax() {
       <li>5 oder mehr geschafft? Nach 3 Minuten Pause schwerer – die App schlägt das Gewicht vor.</li>
       <li>Weniger als 5 oder 5 Versuche erreicht: fertig. Es zählt der schwerste saubere 5er.</li>
       <li>Reihenfolge wie im Training – so bleiben die Tests untereinander und mit dem Training vergleichbar. Vor Kreuzheben direkt nach Squats 5 Minuten Pause.</li>
-      <li>Squats und Bankdrücken mit Sicherung (Ablagen/Partner).</li></ol>
+      <li>Squats und Bankdrücken mit Sicherung: Ablagen oder eine zweite Person.</li></ol>
       <p class="muted small">Ein Test ersetzt ein normales Training. Teste ausgeruht, nicht nach einer harten Woche.</p></details>
     <h2>Rhythmus</h2><div class="card goal-card"><span class="spacer">Test alle</span>
       <button class="btn-icon" data-act="max-every" data-d="-1" ${weeks <= 2 ? 'disabled' : ''} aria-label="kürzer">−</button><b class="goal-n">${weeks}</b>
@@ -903,7 +903,7 @@ const roundStepUI = (w, step) => Math.round(w / step) * step;
 function viewProfile() {
   const p = db.profile || {}, ph = L.profileHints(), lw = ph.weight;
   let h = topbar('Profil');
-  h += `<p class="muted small">Deine Basisdaten helfen dem Coach, dich richtig einzuschätzen. Sie bleiben nur auf diesem Gerät.</p>
+  h += `<p class="muted small">Mit deinen Basisdaten werden die Hinweise im Coach genauer. Sie bleiben nur auf diesem Gerät.</p>
     <div class="card prof">
       <div class="grid2"><label class="field"><span>Größe (cm)</span><input data-prof="height" inputmode="numeric" pattern="[0-9]*" value="${p.height ?? ''}" placeholder="z. B. 180"></label>
       <label class="field"><span>Alter</span><input data-prof="age" inputmode="numeric" pattern="[0-9]*" value="${ph.age ?? ''}" placeholder="z. B. 35"></label></div>
@@ -923,7 +923,7 @@ function viewProfile() {
   const facts = [];
   if (ph.bmi) facts.push(`<div class="cc-check info">${icon('stNone')}<span><b>BMI ${fmtNum(ph.bmi)}</b><small>Grobe Kennzahl aus Größe und Gewicht – Muskeln werden dabei nicht berücksichtigt.</small></span></div>`);
   for (const x of ph.hints) facts.push(`<div class="cc-check ok">${icon('coach')}<span><b>${esc(x.text)}</b></span></div>`);
-  if (facts.length) h += `<h2>Was der Coach daraus ableitet</h2><div class="card cc-checks">${facts.join('')}</div>`;
+  if (facts.length) h += `<h2>Daraus abgeleitet</h2><div class="card cc-checks">${facts.join('')}</div>`;
   return h;
 }
 
@@ -1262,7 +1262,7 @@ $app.addEventListener('click', ev => {
       }
       if (act === 'ci-done') {
         if (!rs.checkin.time) rs.checkin.time = L.timeOfDay(rs.startedAt || rs.createdAt);
-        rs.checkin.done = true; editingCheckin = null; toast('Danke! Der Coach merkt sich das.');
+        rs.checkin.done = true; editingCheckin = null; toast('Danke! Fließt in die Coach-Auswertung ein.');
       }
       save(); rerenderKeepScroll(); return;
     }

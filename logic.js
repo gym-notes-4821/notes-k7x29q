@@ -58,7 +58,7 @@ const START_VALUES = [
   ['Bankdrücken mit Kurzhanteln', 17.5, [12, 12, 8], null, true],
   ['Latziehen', 45, [12, 12, 10], null, false],
   ['Butterfly mit Kurzhanteln', 12.5, [12, 11, 9], null, true],
-  ['Rudern aufrecht', 20, [12, 12, 12], null, false],
+  ['Rudern sitzend', 20, [12, 12, 12], null, false], // Rudern im Sitzen an der Maschine
   ['Schulterdrücken', 7.5, [12, 12, 10], null, true],
   ['Bizepscurls', 12, [13, 13], 'A', true],
   ['Trizeps am Turm 1', 18, [13, 13], 'A', false],
@@ -96,8 +96,28 @@ function freshDb() {
 }
 
 /* ---------------- Migration ---------------- */
+/**
+ * Benennt eine Übung im Standardplan um, ohne gespeicherte Trainings zu verändern:
+ * Die Zuordnung alt → neu steht in d.renames, damit der Verlauf weiterläuft.
+ * Ein offenes Training übernimmt den neuen Namen, solange für die Übung noch nichts eingetragen ist.
+ */
+function renameInStartPlan(d, oldName, newName) {
+  const o = normKey(oldName), n = normKey(newName);
+  d.renames = d.renames || {};
+  const plan = d.plans.find(p => p.id === START_PLAN_ID);
+  const e = plan && plan.exercises.find(x => normKey(x.name) === o);
+  if (!e) return;
+  e.name = newName;
+  delete d.renames[n];
+  d.renames[o] = n;
+  for (const s of d.sessions) {
+    if (s.status !== 'active' || s.planId !== START_PLAN_ID) continue;
+    for (const ex of s.exercises)
+      if (ex.key === o && !ex.skipped && ex.sets.every(x => x.r == null)) { ex.name = newName; ex.key = n; }
+  }
+}
 const validDb = d => !!d && Array.isArray(d.plans) && Array.isArray(d.sessions);
-const DATA_VERSION = 5;
+const DATA_VERSION = 6;
 /** Bringt Daten beliebiger älterer Version auf die aktuelle Version. Selbst eingetragene Trainings bleiben unverändert. */
 function migrate(input) {
   if (!validDb(input)) throw new Error('Ungültiges Datenformat');
@@ -161,19 +181,7 @@ function migrate(input) {
   }
   if (d.version < 4) {
     // Version 4: Hackenschmidt wird im Standardplan durch Squats ersetzt; der Verlauf läuft weiter.
-    // Gespeicherte Trainings behalten ihren Namen, die Zuordnung steht in d.renames.
-    d.renames = d.renames || {};
-    const plan = d.plans.find(p => p.id === START_PLAN_ID);
-    const e = plan && plan.exercises.find(x => normKey(x.name) === 'hackenschmidt');
-    if (e) {
-      e.name = 'Squats';
-      d.renames['hackenschmidt'] = 'squats';
-      for (const s of d.sessions) {
-        if (s.status !== 'active' || s.planId !== START_PLAN_ID) continue;
-        for (const ex of s.exercises)
-          if (ex.key === 'hackenschmidt' && !ex.skipped && ex.sets.every(x => x.r == null)) { ex.name = 'Squats'; ex.key = 'squats'; }
-      }
-    }
+    renameInStartPlan(d, 'Hackenschmidt', 'Squats');
     d.version = 4;
   }
   if (d.version < 5) {
@@ -194,6 +202,11 @@ function migrate(input) {
       }
     }
     d.version = 5;
+  }
+  if (d.version < 6) {
+    // Version 6: „Rudern aufrecht“ ist Rudern im Sitzen an der Maschine – eindeutiger Name, Verlauf läuft weiter.
+    renameInStartPlan(d, 'Rudern aufrecht', 'Rudern sitzend');
+    d.version = 6;
   }
   if (!d.plans.some(p => p.id === d.activePlanId)) d.activePlanId = d.plans[0] ? d.plans[0].id : null;
   return d;

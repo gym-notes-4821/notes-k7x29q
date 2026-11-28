@@ -28,7 +28,7 @@ test('Standardplan: 13 Übungen in richtiger Reihenfolge, Supersätze A/B', () =
   const db = L.freshDb(); L.setDb(db);
   const p = db.plans[0];
   assert.deepStrictEqual(p.exercises.map(e => e.name), ['Squats', 'Kreuzheben', 'Bankdrücken mit Kurzhanteln', 'Latziehen',
-    'Butterfly mit Kurzhanteln', 'Rudern aufrecht', 'Schulterdrücken', 'Bizepscurls', 'Trizeps am Turm 1', 'Seitheben', 'Hammercurls', 'Trizeps am Turm 2', 'Crunches am Kabelzug']);
+    'Butterfly mit Kurzhanteln', 'Rudern sitzend', 'Schulterdrücken', 'Bizepscurls', 'Trizeps am Turm 1', 'Seitheben', 'Hammercurls', 'Trizeps am Turm 2', 'Crunches am Kabelzug']);
   assert.deepStrictEqual(p.exercises.map(e => e.group || '-').join(''), '-------AAABBB');
   assert.deepStrictEqual(p.exercises.map(e => e.sets), [3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2, 2]);
   assert.deepStrictEqual(p.exercises.slice(2, 7).map(e => e.guide), [17.5, 45, 12.5, 20, 7.5]);
@@ -59,7 +59,7 @@ const db1 = L.freshDb(); L.setDb(db1);
 const s1 = addTraining(db1, today, {
   'Latziehen': [[45, 12], [45, 12], [45, 12]],            // grün
   'Squats': [[10, 12], [10, 12], [10, 8]],         // gelb
-  'Rudern aufrecht': [[20, 12], [20, 11], [20, 12]],      // orange
+  'Rudern sitzend': [[20, 12], [20, 11], [20, 12]],      // orange
   'Kreuzheben': [[45, 10], [42.5, 10]],                   // gegensätzlich, 1RM +0,8 % => gelb
   'Schulterdrücken': [[10, 10], [7.5, 12], [7.5, 10]],    // gegensätzlich, 1RM +27 % => grün
   'Butterfly mit Kurzhanteln': [[11, 13], [12.5, 11], [12.5, 9]], // Rang: 12,5×11 vs 12,5×12 => orange
@@ -79,7 +79,7 @@ test('Grün: mehr Wiederholungen bei gleichem Gewicht', () => {
 });
 test('Gelb: alles gleich', () => { assert.strictEqual(A('Squats').status, 'same'); });
 test('Orange: weniger Wiederholungen bei gleichem Gewicht', () => {
-  const a = A('Rudern aufrecht'); assert.strictEqual(a.status, 'down'); assert.ok(a.text.includes('eine Wiederholung weniger'), a.text);
+  const a = A('Rudern sitzend'); assert.strictEqual(a.status, 'down'); assert.ok(a.text.includes('eine Wiederholung weniger'), a.text);
 });
 test('Gegensätzlich, 1RM-Änderung < 1 % => Stagnation mit Hinweis', () => {
   const a = A('Kreuzheben');
@@ -103,7 +103,7 @@ test('Übersprungen => grau, nicht orange; Supersatz-Partner normal', () => {
 test('Fortschritt: letztes Training gegen vorheriges', () => {
   assert.strictEqual(L.latestProgress('latziehen').status, 'up');
   assert.strictEqual(L.latestProgress('trizeps am turm 2').status, 'up');
-  assert.strictEqual(L.latestProgress('rudern aufrecht').status, 'down');
+  assert.strictEqual(L.latestProgress('rudern sitzend').status, 'down');
 });
 test('Plan-Kraftkurve startet bei 0 % (Startwerte) und steigt', () => {
   const pr = L.planProgress(db1.plans[0]);
@@ -340,6 +340,26 @@ test('Migration Version 4 → 5: Crunches am Kabelzug in Supersatz B, auch im of
   assert.strictEqual(L.migrate(d).plans[0].exercises.filter(e => e.name === 'Crunches am Kabelzug').length, 1, 'nicht doppelt');
   // Supersatz B hat jetzt 3 Übungen
   assert.deepStrictEqual(L.blocks(p.exercises).at(-1).items.map(i => i.ex.name), ['Hammercurls', 'Trizeps am Turm 2', 'Crunches am Kabelzug']);
+});
+test('Migration Version 5 → 6: „Rudern aufrecht“ wird „Rudern sitzend“, Verlauf läuft weiter, Rücken statt Schultern', () => {
+  const old = L.freshDb(); L.setDb(old);
+  const plan = old.plans[0];
+  const rx = plan.exercises.find(e => e.name === 'Rudern sitzend'); rx.name = 'Rudern aufrecht';
+  const set = s => { const ex = s.exercises.find(e => e.name === 'Rudern sitzend' || e.name === 'Rudern aufrecht'); ex.name = 'Rudern aufrecht'; ex.key = 'rudern aufrecht'; return ex; };
+  set(old.sessions[0]);
+  const real = addTraining(old, today, {});
+  Object.assign(set(real), { skipped: false, sets: sets([[22.5, 12], [22.5, 12], [22.5, 11]]) });
+  old.version = 5; old.renames = { hackenschmidt: 'squats' };
+  const d = L.migrate(old); L.setDb(d);
+  assert.strictEqual(d.version, L.DATA_VERSION);
+  assert.ok(d.plans[0].exercises.some(e => e.name === 'Rudern sitzend'));
+  assert.deepStrictEqual(d.renames, { hackenschmidt: 'squats', 'rudern aufrecht': 'rudern sitzend' });
+  assert.strictEqual(d.sessions.find(s => s.id === real.id).exercises.find(e => e.key === 'rudern aufrecht').sets[0].w, 22.5, 'Training unverändert');
+  assert.strictEqual(L.exerciseHistory('rudern sitzend').length, 2);
+  const n0 = L.newSession(d.plans[0], today); n0.createdAt = Date.now() + 30000;
+  assert.deepStrictEqual(exOf(L.prefillWeights(n0), 'Rudern sitzend').sets.map(x => x.w), [22.5, 22.5, 22.5]);
+  const load = L.planMuscleLoad(d.plans[0]).load;
+  assert.strictEqual(L.muscleLevel(load.upperback), 3, 'oberer Rücken jetzt stark');
 });
 test('Migration ist wiederholbar (keine doppelten Startwerte)', () => {
   const d = L.migrate(L.migrate(v1));

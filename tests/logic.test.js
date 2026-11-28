@@ -196,6 +196,31 @@ test('Vorausfüllen ohne Vorgeschichte: Orientierungsgewicht oder leer', () => {
   assert.deepStrictEqual(s.exercises[0].sets.map(x => x.w), [80, 80]);
   assert.deepStrictEqual(s.exercises[1].sets.map(x => x.w), [null, null]);
 });
+test('Muskelbereiche: Squats trainieren mehr als den Oberschenkel', () => {
+  const m = L.musclesOf('Squats');
+  assert.strictEqual(m.quads, 1); assert.strictEqual(m.glutes, 1);
+  assert.ok(m.adductors > 0 && m.lowerback > 0 && m.abs > 0 && m.hamstrings > 0 && m.calves > 0);
+  // Reihenfolge der Regeln: spezielle Namen vor allgemeinen
+  assert.deepStrictEqual(Object.keys(L.musclesOf('Hammercurls')), ['biceps', 'forearms']);
+  assert.ok(L.musclesOf('Rudern aufrecht').shoulders === 1 && !L.musclesOf('Rudern aufrecht').upperback);
+  assert.strictEqual(L.musclesOf('Brustgestütztes Rudern').upperback, 1);
+  assert.strictEqual(L.musclesOf('Reverse Butterfly').reardelts, 1);
+  assert.strictEqual(L.musclesOf('Butterfly mit Kurzhanteln').chest, 1);
+  assert.strictEqual(L.musclesOf('Beinbeuger (Leg Curl)').hamstrings, 1);
+  assert.strictEqual(L.musclesOf('Trizeps am Turm 1').triceps, 1);
+  assert.strictEqual(L.musclesOf('Crunches am Kabelzug').abs, 1);
+  assert.strictEqual(L.musclesOf('Yoga'), null);
+});
+test('Muskelbereiche: Belastung je Plan = Sätze × Beteiligung, mit Stufen', () => {
+  const plan = { exercises: [L.mkPlanEx('Squats', 3, 50), L.mkPlanEx('Wadenheben', 1, 40), L.mkPlanEx('Yoga', 2, null)] };
+  const { load, unknown } = L.planMuscleLoad(plan);
+  assert.strictEqual(load.quads, 3); assert.strictEqual(load.calves, 1.75); assert.strictEqual(load.adductors, 1.5);
+  assert.deepStrictEqual(unknown, ['Yoga']);
+  assert.deepStrictEqual([0, 1, 2, 4].map(L.muscleLevel), [0, 1, 2, 3]);
+  const std = L.planMuscleLoad(L.defaultPlan()).load;
+  assert.strictEqual(L.muscleLevel(std.chest), 3); assert.strictEqual(L.muscleLevel(std.glutes), 3);
+  assert.strictEqual(L.muscleLevel(std.calves), 1);
+});
 const v1 = require('./v1-sample.json'); // Daten im alten Format (Version 1)
 test('Migration: Version 1 lädt ohne Fehler, Trainings bleiben erhalten', () => {
   const d = L.migrate(v1); L.setDb(d);

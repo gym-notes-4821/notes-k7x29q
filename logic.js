@@ -460,12 +460,69 @@ function normalizeGroups(plan) {
   return plan;
 }
 
+/* ---------------- Trainierte Muskelbereiche ---------------- */
+const MUSCLES = [
+  ['chest', 'Brust'], ['shoulders', 'Schultern'], ['reardelts', 'hintere Schulter'], ['biceps', 'Bizeps'],
+  ['triceps', 'Trizeps'], ['forearms', 'Unterarme'], ['abs', 'Bauch'], ['obliques', 'seitlicher Bauch'],
+  ['traps', 'Nacken'], ['upperback', 'oberer Rücken'], ['lats', 'breiter Rücken'], ['lowerback', 'unterer Rücken'],
+  ['glutes', 'Gesäß'], ['quads', 'Oberschenkel vorne'], ['adductors', 'Oberschenkel innen'],
+  ['hamstrings', 'Oberschenkel hinten'], ['calves', 'Waden'],
+];
+/**
+ * Muskelbeteiligung je Übung: 1 = Hauptmuskel, 0,5 = deutlich beteiligt, 0,25 = hilft mit.
+ * Erkennung über Stichworte im Namen; die erste passende Regel gilt (Reihenfolge ist wichtig).
+ */
+const EXERCISE_MUSCLES = [
+  [/crunch|bauch|sit.?up|plank|beinheben|ab.?roll/, { abs: 1, obliques: 0.25 }],
+  [/kreuzheben|deadlift/, { hamstrings: 1, glutes: 1, lowerback: 1, quads: 0.5, traps: 0.5, upperback: 0.5, forearms: 0.5, lats: 0.25, abs: 0.25 }],
+  [/squat|kniebeuge|hackenschmidt/, { quads: 1, glutes: 1, adductors: 0.5, lowerback: 0.5, hamstrings: 0.25, abs: 0.25, calves: 0.25 }],
+  [/beinpresse|leg ?press/, { quads: 1, glutes: 0.5, adductors: 0.5, hamstrings: 0.25 }],
+  [/ausfallschritt|lunge|split/, { quads: 1, glutes: 1, adductors: 0.25, hamstrings: 0.25 }],
+  [/beinbeuger|leg ?curl/, { hamstrings: 1, calves: 0.25 }],
+  [/beinstrecker|leg ?extension/, { quads: 1 }],
+  [/hip ?thrust|glute|gesäß/, { glutes: 1, hamstrings: 0.5 }],
+  [/adduktor/, { adductors: 1 }],
+  [/wade|calf/, { calves: 1 }],
+  [/reverse.?(fly|butterfly)|face ?pull|hintere schulter/, { reardelts: 1, upperback: 0.5, traps: 0.25 }],
+  [/bankdrücken|bench|brustpresse|liegestütz|push.?up|\bdips?\b/, { chest: 1, shoulders: 0.5, triceps: 0.5 }],
+  [/butterfly|\bfly|flys|cross.?over/, { chest: 1, shoulders: 0.25 }],
+  [/latziehen|latzug|lat.?zug|klimmz|pull.?up|chin.?up/, { lats: 1, biceps: 0.5, upperback: 0.5, reardelts: 0.25, forearms: 0.25 }],
+  [/rudern aufrecht|aufrechtes rudern|upright/, { shoulders: 1, traps: 1, biceps: 0.25 }],
+  [/rudern|row/, { upperback: 1, lats: 0.75, reardelts: 0.5, biceps: 0.5, lowerback: 0.25, forearms: 0.25 }],
+  [/schulterdrücken|overhead|military|arnold|nackendrücken/, { shoulders: 1, triceps: 0.5, traps: 0.25 }],
+  [/seitheben|lateral/, { shoulders: 1, traps: 0.25 }],
+  [/frontheben|front.?raise/, { shoulders: 1 }],
+  [/shrug|schulterheben/, { traps: 1, forearms: 0.25 }],
+  [/hammer/, { biceps: 1, forearms: 0.5 }],
+  [/trizeps|triceps|french|skull|push.?down|kickback/, { triceps: 1 }],
+  [/curl|bizeps/, { biceps: 1, forearms: 0.25 }],
+  [/unterarm|wrist|farmer|griff/, { forearms: 1 }],
+  [/rückenstrecker|hyperextension|back.?extension/, { lowerback: 1, glutes: 0.5, hamstrings: 0.25 }],
+];
+function musclesOf(name) {
+  const n = normKey(name);
+  const hit = EXERCISE_MUSCLES.find(([re]) => re.test(n));
+  return hit ? hit[1] : null;
+}
+/** Belastung je Muskel für einen Plan: Summe aus Satzanzahl × Beteiligung. */
+function planMuscleLoad(plan) {
+  const load = {}, unknown = [];
+  for (const e of plan.exercises) {
+    const m = musclesOf(e.name);
+    if (!m) { unknown.push(e.name); continue; }
+    for (const [id, f] of Object.entries(m)) load[id] = (load[id] || 0) + f * (e.sets || 0);
+  }
+  return { load, unknown };
+}
+/** 0 = nicht, 1 = leicht (< 2), 2 = mittel (ab 2), 3 = stark (ab 4 gewichteten Sätzen pro Training) */
+const muscleLevel = v => !v ? 0 : v >= 4 ? 3 : v >= 2 ? 2 : 1;
+
 const api = {
   uid, normKey, round2, round1, pad, todayISO, dayNum, addDaysISO, parseNum, parseInt0, fmtNum, fmtSet, fmtSets, fmtPct, fmtDate, repWord, e1rm,
   START_PLAN_ID, START_VALUES, DATA_VERSION, mkPlanEx, defaultPlan, snapshotEx, newSession, baselineSession, freshDb, validDb, migrate,
   setDb, getDb, canon, sameEx, renameExercise, sessionOrder, doneSessions, isValidSet, validSets, bestE1, bestSetByE1, exerciseHistory, previousEntry,
   rankSets, cmpPair, compareSets, diffText, explain, trendFor, analyzeExercise, latestProgress, planProgress,
-  forecastFor, forecastText, planForecast, blocks, normalizeGroups, MAX_WEEKLY, prefillWeights, isUntouched,
+  forecastFor, forecastText, planForecast, blocks, normalizeGroups, MAX_WEEKLY, MUSCLES, musclesOf, planMuscleLoad, muscleLevel, prefillWeights, isUntouched,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.Logic = api;

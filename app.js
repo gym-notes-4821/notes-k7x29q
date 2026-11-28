@@ -69,6 +69,72 @@ const DACKEL = `<svg class="brand-dog" viewBox="22 22 228 106" fill="none" strok
   <path d="M196 39 C185 45 185 62 194 66 C201 61 203 49 196 39 Z"/>
   <circle cx="207" cy="45" r="3.4" fill="currentColor" stroke="none"/><circle cx="235" cy="56" r="3.6" fill="currentColor" stroke="none"/></svg>`;
 
+/* ---- Körperansicht: trainierte Muskelbereiche (vorne/hinten) ----
+   Linke Körperhälfte wird gezeichnet und für rechts gespiegelt (Mitte x = 100). */
+const BODY = {
+  front: {
+    neutral: [
+      '<circle cx="100" cy="30" r="19"/>', '<path d="M91 47 L109 47 L111 62 L89 62 Z"/>',
+      'L:<path d="M71 186 L98 192 L98 206 L70 198 Z"/>',
+      'L:<path d="M72 300 C69 328 71 356 75 384 L89 384 C93 356 94 328 91 300 C85 296 77 296 72 300 Z"/>',
+      'L:<ellipse cx="48" cy="210" rx="7" ry="10"/>',
+    ],
+    muscles: {
+      traps: 'M98 62 L98 70 L80 72 C86 66 92 63 98 62 Z',
+      shoulders: 'M78 72 C63 66 50 74 47 92 C49 100 53 104 58 105 C60 94 65 83 78 76 Z',
+      chest: 'M98 74 L98 113 C88 119 72 117 64 107 C62 96 66 84 79 77 C86 73 92 72 98 74 Z',
+      biceps: 'M56 108 C50 118 47 133 49 147 C53 151 59 151 63 147 C66 133 66 120 63 110 Z',
+      forearms: 'M49 153 C45 169 43 185 44 199 L53 199 C57 185 61 169 62 153 Z',
+      abs: 'M89 119 L98 121 L98 183 C94 186 91 185 89 181 Z',
+      obliques: 'M87 119 C77 121 70 131 70 147 C72 163 77 176 87 182 Z',
+      quads: 'M70 199 C66 222 66 251 70 280 C74 292 84 295 92 289 C96 263 96 229 94 207 C86 202 78 199 70 199 Z',
+      adductors: 'M95 208 L98 209 L98 247 C97 251 95 253 93 253 C95 237 96 222 95 208 Z',
+    },
+  },
+  back: {
+    neutral: [
+      '<circle cx="100" cy="30" r="19"/>', '<path d="M91 47 L109 47 L111 58 L89 58 Z"/>',
+      'L:<path d="M74 352 C73 364 74 374 76 384 L89 384 C91 374 91 362 89 352 Z"/>',
+      'L:<ellipse cx="48" cy="210" rx="7" ry="10"/>',
+    ],
+    muscles: {
+      traps: 'M98 56 L98 106 C92 99 85 88 78 74 C85 66 92 60 98 56 Z',
+      reardelts: 'M77 72 C63 66 50 74 47 92 C49 100 53 104 58 105 C60 94 65 83 77 76 Z',
+      upperback: 'M97 108 C88 102 81 92 77 80 C71 90 71 102 76 111 C84 115 91 115 97 114 Z',
+      lats: 'M76 115 C70 110 67 103 65 106 C63 126 69 151 85 171 C91 160 95 143 96 127 L96 117 Z',
+      lowerback: 'M98 128 C97 146 94 162 89 175 C93 180 96 182 98 182 Z',
+      triceps: 'M56 108 C50 118 47 133 49 147 C53 151 59 151 63 147 C66 133 66 120 63 110 Z',
+      forearms: 'M49 153 C45 169 43 185 44 199 L53 199 C57 185 61 169 62 153 Z',
+      glutes: 'M98 187 C88 183 75 185 70 197 C67 213 73 227 87 229 C93 228 98 222 98 211 Z',
+      hamstrings: 'M70 232 C68 253 70 273 74 290 C80 297 88 297 94 291 C96 271 96 250 94 233 C86 235 77 235 70 232 Z',
+      calves: 'M73 302 C66 316 66 334 72 348 C78 355 86 353 90 345 C94 331 92 314 88 302 C83 299 77 299 73 302 Z',
+    },
+  },
+};
+const mirror = svg => `<g transform="translate(200,0) scale(-1,1)">${svg}</g>`;
+function bodySVG(side, load) {
+  const b = BODY[side];
+  let g = '<g class="bm-neutral">';
+  for (const n of b.neutral) g += n.startsWith('L:') ? n.slice(2) + mirror(n.slice(2)) : n;
+  g += '</g>';
+  for (const [id, d] of Object.entries(b.muscles)) {
+    const lv = L.muscleLevel(load[id]);
+    const p = `<path d="${d}"/>`;
+    g += `<g class="bm bm-${lv}" data-m="${id}">${p}${mirror(p)}</g>`;
+  }
+  return `<svg class="body-svg" viewBox="36 6 128 382" role="img" aria-label="Körper ${side === 'front' ? 'vorne' : 'hinten'}">${g}</svg>`;
+}
+function bodyMap(plan) {
+  const { load, unknown } = L.planMuscleLoad(plan);
+  const by = lv => L.MUSCLES.filter(([id]) => L.muscleLevel(load[id]) === lv).map(([, n]) => n);
+  const lines = [[3, 'Stark'], [2, 'Mittel'], [1, 'Leicht']].map(([lv, t]) => by(lv).length ? `<div class="bm-line"><span class="bm-dot bm-${lv}"></span><b>${t}:</b> ${by(lv).join(', ')}</div>` : '').join('');
+  const none = by(0);
+  return `<div class="bodymap"><div class="bm-figs"><figure>${bodySVG('front', load)}<figcaption>vorne</figcaption></figure>
+    <figure>${bodySVG('back', load)}<figcaption>hinten</figcaption></figure></div>
+    <div class="bm-legend">${lines}${none.length ? `<div class="bm-line muted"><span class="bm-dot bm-0"></span><b>Kaum:</b> ${none.join(', ')}</div>` : ''}
+    ${unknown.length ? `<div class="bm-line muted small">Nicht zugeordnet: ${unknown.map(esc).join(', ')}</div>` : ''}</div></div>`;
+}
+
 /* ---------------- Gemeinsame Bausteine ---------------- */
 function topbar(title, back = '#/', home = false) {
   return `<header class="topbar"><a class="back" href="${back}">${icon('back')}Zurück</a><h1>${esc(title)}</h1>
@@ -428,7 +494,7 @@ function viewPlans() {
     const on = p.id === db.activePlanId;
     h += `<div class="card plan-card ${on ? 'on' : ''}"><button class="plan-pick" data-act="activate" data-plan="${p.id}">
       <span class="radio">${on ? '✓' : ''}</span><span class="spacer"><b>${esc(p.name)}</b><span class="muted small">${p.exercises.length} Übungen${on ? ' · aktiv' : ''}</span></span></button>
-      <a class="btn btn-ghost btn-small" href="#/plan/${p.id}">Bearbeiten</a></div>`;
+      <a class="btn btn-ghost btn-small" href="#/plan/${p.id}">Bearbeiten</a>${p.exercises.length ? bodyMap(p) : ''}</div>`;
   }
   h += `<button class="btn-ghost btn-block" data-act="new-plan">+ Neuer Plan</button>
     <h2>Sicherung</h2><div class="card stack">

@@ -51,7 +51,7 @@ const e1rm = s => s.w * (1 + s.r / 30);
 
 /* ---------------- Standardplan & Startwerte ---------------- */
 const START_PLAN_ID = 'plan-ganzkoerper-v2';
-// [Name, Gewicht (bei Kurzhanteln pro Hantel), Wiederholungen je Satz (Startwerte), Supersatz, pro Hantel, Sätze im Plan]
+// [Name, Gewicht (bei Kurzhanteln pro Hantel), Wiederholungen je Satz (Startwerte), Supersatz, pro Hantel, Sätze im Plan, feste ID]
 const START_VALUES = [
   ['Squats', 10, [12, 12, 8], null, false],
   ['Kreuzheben', 42.5, [12, 10], null, false, 3],
@@ -63,9 +63,10 @@ const START_VALUES = [
   ['Bizepscurls', 12, [13, 13], 'A', true],
   ['Trizeps am Turm 1', 18, [13, 13], 'A', false],
   ['Seitheben', 5, [13, 13], 'A', true],
-  ['Hammercurls', 12.5, [13, 12], 'B', true],
-  ['Trizeps am Turm 2', 18, [13, 10], 'B', false],
-  ['Crunches am Kabelzug', null, [], 'B', false, 2], // noch ohne Startwerte
+  ['Vorgebeugtes Seitheben', null, [], 'A', true, 2, 'gk-14'], // hintere Schulter, noch ohne Startwerte
+  ['Hammercurls', 12.5, [13, 12], 'B', true, 0, 'gk-11'],
+  ['Trizeps am Turm 2', 18, [13, 10], 'B', false, 0, 'gk-12'],
+  ['Crunches am Kabelzug', null, [], 'B', false, 2, 'gk-13'], // noch ohne Startwerte
 ];
 function mkPlanEx(name, sets, guide, opts = {}) {
   return { id: opts.id || uid(), name, sets, guide: guide ?? null, perDumbbell: !!opts.perDumbbell, group: opts.group || null };
@@ -73,7 +74,7 @@ function mkPlanEx(name, sets, guide, opts = {}) {
 function defaultPlan() {
   return {
     id: START_PLAN_ID, name: 'Ganzkörperplan',
-    exercises: START_VALUES.map(([name, w, reps, group, pd, sets], i) => mkPlanEx(name, sets || reps.length, w, { id: `gk-${i + 1}`, group, perDumbbell: pd })),
+    exercises: START_VALUES.map(([name, w, reps, group, pd, sets, id], i) => mkPlanEx(name, sets || reps.length, w, { id: id || `gk-${i + 1}`, group, perDumbbell: pd })),
   };
 }
 function snapshotEx(pe) {
@@ -97,6 +98,30 @@ function freshDb() {
 
 /* ---------------- Migration ---------------- */
 /**
+ * Fügt eine Übung in den Standardplan ein – direkt nach der Übung „afterKey“ und in deren Supersatz –
+ * und ebenso in ein gerade offenes Training. Abgeschlossene Trainings bleiben unverändert.
+ */
+function addToStartPlan(d, pe, afterKey) {
+  const plan = d.plans.find(p => p.id === START_PLAN_ID);
+  if (!plan || plan.exercises.some(e => normKey(e.name) === normKey(pe.name))) return;
+  if (plan.exercises.some(e => e.id === pe.id)) pe.id = uid();
+  const i = plan.exercises.findIndex(e => normKey(e.name) === afterKey);
+  pe.group = i >= 0 ? plan.exercises[i].group : null;
+  plan.exercises.splice(i >= 0 ? i + 1 : plan.exercises.length, 0, pe);
+  for (const s of d.sessions) {
+    if (s.status !== 'active' || s.planId !== START_PLAN_ID || s.exercises.some(e => e.key === normKey(pe.name))) continue;
+    const wasUntouched = s.prefill && isUntouched(s);
+    const j = s.exercises.findIndex(e => sameKeyIn(d, e.key, afterKey));
+    s.exercises.splice(j >= 0 ? j + 1 : s.exercises.length, 0, snapshotEx(pe));
+    if (wasUntouched) s.prefill = weightSignature(s);
+  }
+}
+/** Schlüsselvergleich während der Migration (d ist dort noch nicht als db gesetzt). */
+function sameKeyIn(d, a, b) {
+  const r = d.renames || {}, c = k => { const seen = new Set(); while (r[k] && !seen.has(k)) { seen.add(k); k = r[k]; } return k; };
+  return c(a) === c(b);
+}
+/**
  * Benennt eine Übung im Standardplan um, ohne gespeicherte Trainings zu verändern:
  * Die Zuordnung alt → neu steht in d.renames, damit der Verlauf weiterläuft.
  * Ein offenes Training übernimmt den neuen Namen, solange für die Übung noch nichts eingetragen ist.
@@ -117,7 +142,7 @@ function renameInStartPlan(d, oldName, newName) {
   }
 }
 const validDb = d => !!d && Array.isArray(d.plans) && Array.isArray(d.sessions);
-const DATA_VERSION = 6;
+const DATA_VERSION = 7;
 /** Bringt Daten beliebiger älterer Version auf die aktuelle Version. Selbst eingetragene Trainings bleiben unverändert. */
 function migrate(input) {
   if (!validDb(input)) throw new Error('Ungültiges Datenformat');
@@ -207,6 +232,11 @@ function migrate(input) {
     // Version 6: „Rudern aufrecht“ ist Rudern im Sitzen an der Maschine – eindeutiger Name, Verlauf läuft weiter.
     renameInStartPlan(d, 'Rudern aufrecht', 'Rudern sitzend');
     d.version = 6;
+  }
+  if (d.version < 7) {
+    // Version 7: vorgebeugtes Seitheben (hintere Schulter) direkt nach dem Seitheben, im selben Supersatz.
+    addToStartPlan(d, mkPlanEx('Vorgebeugtes Seitheben', 2, null, { id: 'gk-14', perDumbbell: true }), 'seitheben');
+    d.version = 7;
   }
   if (!d.plans.some(p => p.id === d.activePlanId)) d.activePlanId = d.plans[0] ? d.plans[0].id : null;
   return d;
@@ -496,7 +526,7 @@ const EXERCISE_MUSCLES = [
   [/hip ?thrust|glute|gesäß/, { glutes: 1, hamstrings: 0.5 }],
   [/adduktor/, { adductors: 1 }],
   [/wade|calf/, { calves: 1 }],
-  [/reverse.?(fly|butterfly)|face ?pull|hintere schulter/, { reardelts: 1, upperback: 0.5, traps: 0.25 }],
+  [/vorgebeugt|reverse.?(fly|butterfly)|face ?pull|hintere schulter|rear.?delt/, { reardelts: 1, upperback: 0.5, traps: 0.25 }],
   [/bankdrücken|bench|brustpresse|liegestütz|push.?up|\bdips?\b/, { chest: 1, shoulders: 0.5, triceps: 0.5 }],
   [/butterfly|\bfly|flys|cross.?over/, { chest: 1, shoulders: 0.25 }],
   [/latziehen|latzug|lat.?zug|klimmz|pull.?up|chin.?up/, { lats: 1, biceps: 0.5, upperback: 0.5, reardelts: 0.25, forearms: 0.25 }],

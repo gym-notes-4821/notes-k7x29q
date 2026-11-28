@@ -389,6 +389,25 @@ test('Gefühl: 2× „gut“ = bereit für mehr, 2 von 3 „schlecht“ = Hinwei
   assert.ok(L.coachTips('stagnant', 'good')[0].includes('Gewichtsstufe höher'));
   assert.ok(L.coachTips('stagnant', 'bad')[0].startsWith('Erholung'));
 });
+test('Check-in: trainierte Muskeln, Pump-Statistik, wenig Pump trotz viel Training, Trend', () => {
+  const db = L.freshDb(); L.setDb(db);
+  const d = k => L.addDaysISO(today, -12 + k * 3);
+  const full = { 'Squats': [[10, 12]], 'Latziehen': [[45, 12]], 'Rudern sitzend': [[20, 12]], 'Bankdrücken mit Kurzhanteln': [[17.5, 12]] };
+  const s1 = addTraining(db, d(1), full);
+  assert.deepStrictEqual(L.musclesInSession(s1).sort(), ['adductors', 'biceps', 'chest', 'glutes', 'lats', 'lowerback', 'quads', 'reardelts', 'shoulders', 'triceps', 'upperback'].sort());
+  const pumps = [['chest', 'shoulders'], ['chest'], ['chest', 'biceps'], ['chest', 'quads']];
+  const feels = ['good', 'bad', 'bad', 'ok'];
+  [s1, ...[2, 3, 4].map(k => addTraining(db, d(k), full))].forEach((s, k) => { s.checkin = { feel: feels[k], pump: pumps[k], done: true }; });
+  const ps = L.pumpStats(db.plans[0]);
+  assert.strictEqual(ps.total, 4); assert.strictEqual(ps.count.chest, 4); assert.strictEqual(ps.top[0], 'chest');
+  assert.ok(ps.low.includes('upperback') && ps.low.includes('lats'), 'Rücken stark trainiert, aber kaum Pump');
+  assert.ok(!ps.low.includes('chest'));
+  assert.ok(L.pumpTip('upperback').includes('Schulterblätter'));
+  assert.deepStrictEqual(L.checkinTrend(), { bad: true, feels: ['bad', 'bad', 'ok'] });
+  // Übersprungene Check-ins zählen nicht
+  addTraining(db, d(5), full).checkin = { skipped: true };
+  assert.strictEqual(L.recentCheckins().length, 4);
+});
 const v1 = require('./v1-sample.json'); // Daten im alten Format (Version 1)
 test('Migration: Version 1 lädt ohne Fehler, Trainings bleiben erhalten', () => {
   const d = L.migrate(v1); L.setDb(d);

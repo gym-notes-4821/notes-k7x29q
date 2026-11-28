@@ -529,3 +529,30 @@ svg .fline { fill: none; }
 .cc-ready span { display: flex; flex-direction: column; } .cc-ready small { color: var(--muted); font-size: 13px; }
 .coach-card.s-bad { border-left-color: var(--bad); }
 .coach-card.s-bad .st { color: #3a0000; background: var(--bad); }
+
+/* ---------------- Coach-Check-in ---------------- */
+.checkin { border: 1.5px solid rgba(57,255,20,.45); box-shadow: 0 0 18px rgba(57,255,20,.12); }
+.ci-head { display: flex; gap: 10px; align-items: center; margin-bottom: 6px; }
+.ci-head > .i { width: 30px; height: 30px; color: var(--accent); flex: none; }
+.ci-head span { display: flex; flex-direction: column; } .ci-head small { color: var(--muted); font-size: 14px; }
+.ci-q { font-weight: 800; margin: 14px 0 8px; }
+.ci-chips { padding: 8px 0 2px; }
+.ci-chips .chip { display: inline-flex; align-items: center; gap: 4px; }
+.ci-chips .chip .i { width: 14px; height: 14px; }
+.ci-actions { display: grid; grid-template-columns: 2fr 1fr; gap: 8px; margin-top: 12px; }
+.ci-mini { display: flex; align-items: center; gap: 10px; justify-content: space-between; font-size: 14px; }
+.ci-mini > span { display: inline-flex; align-items: center; gap: 6px; flex-wrap: wrap; }
+.ci-mini .i { width: 18px; height: 18px; color: var(--accent); }
+.body-svg.pick { width: 124px; }
+.bm-pick { cursor: pointer; }
+.bm-pick path { fill: #1a1a1a; stroke: #333; stroke-width: 1.4; transition: fill .15s; }
+.bm-pick.tr path { fill: #13240f; stroke: rgba(57,255,20,.55); }
+.bm-pick.dim path { opacity: .55; }
+.bm-pick.sel path { fill: var(--accent); stroke: #000; }
+.body-svg.pick .bm-pick.sel { filter: drop-shadow(0 0 4px rgba(57,255,20,.8)); }
+.pump-card .bm-figs { margin-top: 4px; }
+.pump-tip { display: flex; flex-direction: column; padding: 6px 0; border-top: 1px solid var(--line); }
+.pump-tip small { color: var(--muted); font-size: 14px; }
+.ci-mini .ci-sum { display: flex; flex-direction: column; gap: 3px; align-items: flex-start; }
+.ci-mini .ci-l1 { display: inline-flex; align-items: center; gap: 6px; }
+.ci-mini .ci-l2 { color: var(--muted); }

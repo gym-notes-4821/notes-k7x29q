@@ -138,6 +138,18 @@ function bodySVG(side, load) {
   }
   return `<svg class="body-svg" viewBox="36 6 128 382" role="img" aria-label="Körper ${side === 'front' ? 'vorne' : 'hinten'}">${g}</svg>`;
 }
+/** Körperansicht zum Antippen (Pump-Auswahl): trainierte Muskeln hervorgehoben, gewählte leuchten. */
+function bodyPickSVG(side, trained, selected) {
+  const b = BODY[side];
+  let g = '<g class="bm-neutral">';
+  for (const n of b.neutral) g += n.startsWith('L:') ? n.slice(2) + mirror(n.slice(2)) : n;
+  g += '</g>';
+  for (const [id, d] of Object.entries(b.muscles)) {
+    const p = `<path d="${d}"/>`;
+    g += `<g class="bm-pick ${selected.includes(id) ? 'sel' : ''} ${trained.includes(id) ? 'tr' : 'dim'}" data-act="ci-pump" data-m="${id}" role="button" aria-pressed="${selected.includes(id)}" aria-label="${esc(L.muscleName(id))}">${p}${mirror(p)}</g>`;
+  }
+  return `<svg class="body-svg pick" viewBox="36 6 128 382" aria-label="Körper ${side === 'front' ? 'vorne' : 'hinten'}">${g}</svg>`;
+}
 function bodyMap(plan) {
   const { load, unknown } = L.planMuscleLoad(plan);
   const by = lv => L.MUSCLES.filter(([id]) => L.muscleLevel(load[id]) === lv).map(([, n]) => n);
@@ -568,6 +580,7 @@ function viewResult(id) {
     h += `<div class="pr-box"><div class="pr-head">${icon('trophy')}${prCount === 1 ? 'Neuer Rekord' : `${prCount} neue Rekorde`}</div>${items.slice(0, 4).join('')}
       ${items.length > 4 ? `<details class="pr-more"><summary>${items.length - 4} weitere Rekorde anzeigen</summary>${items.slice(4).join('')}</details>` : ''}</div>`;
   }
+  if (s.status === 'done' && s.kind !== 'baseline') h += checkinCard(s);
   const df = L.dayFeel(s);
   if (df.tough) h += `<div class="card day-tough">${icon('faceBad')}<span><b>Heute insgesamt schwer?</b><small>${df.bad} von ${df.rated} Übungen mit „schlecht“ bewertet. Das liegt oft an Schlaf, Stress oder Essen – nicht an den Übungen. Gönn dir Erholung.</small></span></div>`;
   h += counts(res.map(a => a.status));
@@ -588,6 +601,27 @@ function viewTrainings() {
       <p class="muted small">${esc(s.planName)}${s.unitName ? ' · ' + esc(s.unitName) : ''} · ${s.exercises.filter(e => validSets(e).length).length} Übungen</p></a>`;
   }
   return h;
+}
+
+/* ---- Coach-Check-in nach dem Training ---- */
+let editingCheckin = null;
+function resultSession() { const m = location.hash.match(/^#\/ergebnis\/([^/]+)$/); return m && getSession(m[1]); }
+function checkinCard(s) {
+  const ci = s.checkin || {};
+  if ((ci.done || ci.skipped) && editingCheckin !== s.id) {
+    if (ci.skipped) return `<div class="card ci-mini"><span class="muted">Check-in übersprungen</span><button class="btn-small btn-ghost" data-act="ci-edit">Nachholen</button></div>`;
+    return `<div class="card ci-mini"><span class="ci-sum"><span class="ci-l1">${icon('coach')}<b>Check-in:</b> ${feelChip(ci.feel) || '–'}</span>${(ci.pump || []).length ? `<span class="ci-l2">Pump: ${ci.pump.map(L.muscleName).map(esc).join(', ')}</span>` : ''}</span><button class="btn-small btn-ghost" data-act="ci-edit">Ändern</button></div>`;
+  }
+  const trained = L.musclesInSession(s), sel = ci.pump || [];
+  const chips = L.MUSCLES.filter(([id]) => trained.includes(id) || sel.includes(id))
+    .map(([id, n]) => `<button class="chip ${sel.includes(id) ? 'on' : ''}" data-act="ci-pump" data-m="${id}">${sel.includes(id) ? icon('check') : ''}${esc(n)}</button>`).join('');
+  return `<div class="card checkin"><div class="ci-head">${icon('coach')}<span><b>Coach-Check-in</b><small>Zwei kurze Fragen – damit ich dich besser einschätzen kann.</small></span></div>
+    <div class="ci-q">Wie lief das Training insgesamt?</div>
+    <div class="feel-btns">${L.FEELS.map(v => `<button class="feel-btn f-${v} ${ci.feel === v ? 'on' : ''}" data-act="ci-feel" data-v="${v}" aria-pressed="${ci.feel === v}">${icon(FEEL_UI[v][0])}<small>${FEEL_UI[v][1]}</small></button>`).join('')}</div>
+    <div class="ci-q">Wo hast du den meisten Pump gespürt?</div><p class="muted small" style="margin-top:-4px">Tippe auf die Muskeln – mehrere möglich. Hell umrandet: heute trainiert.</p>
+    <div class="bm-figs">${['front', 'back'].map(side => `<figure>${bodyPickSVG(side, trained, sel)}<figcaption>${side === 'front' ? 'vorne' : 'hinten'}</figcaption></figure>`).join('')}</div>
+    <div class="chips ci-chips">${chips}</div>
+    <div class="ci-actions"><button class="btn-primary" data-act="ci-done" ${ci.feel || sel.length ? '' : 'disabled'}>Fertig</button><button class="btn-ghost" data-act="ci-skip">Überspringen</button></div></div>`;
 }
 
 /* ---------------- Fortschritt ---------------- */
@@ -707,6 +741,13 @@ function viewCoach() {
   }
   const ready = r.exercises.filter(x => x.feel && x.feel.type === 'ready' && !x.issue);
   if (ready.length) h += `<h2>Bereit für mehr</h2><div class="card cc-ready">${ready.map(x => `<a href="#/fortschritt/uebung/${encodeURIComponent(x.key)}">${icon('faceGood')}<span><b>${esc(x.name)}</b><small>2× in Folge „gut“ – ${x.feel.more === 'weight' ? 'nächstes Mal eine Gewichtsstufe höher' : 'mehr Wiederholungen anpeilen'}</small></span></a>`).join('')}</div>`;
+  const ps = L.pumpStats(plan);
+  if (ps.total) {
+    const heat = {}; for (const [id] of L.MUSCLES) { const q = ps.rate(id); heat[id] = q >= 0.5 ? 4 : q >= 0.25 ? 2 : q > 0 ? 1 : 0; }
+    h += `<h2>Dein Pump</h2><div class="card pump-card"><div class="bm-figs"><figure>${bodySVG('front', heat)}<figcaption>vorne</figcaption></figure><figure>${bodySVG('back', heat)}<figcaption>hinten</figcaption></figure></div>
+      <p class="small" style="margin-top:8px">Am häufigsten Pump${ps.total > 1 ? ` (letzte ${ps.total} Check-ins)` : ''}: <b>${ps.top.map(id => `${esc(L.muscleName(id))} (${ps.count[id]}×)`).join(', ')}</b></p>
+      ${ps.low.length ? `<div class="cc-label">Wenig Pump trotz viel Training</div>${ps.low.map(id => `<div class="pump-tip"><b>${esc(L.muscleName(id))}</b><small>${esc(L.pumpTip(id))}</small></div>`).join('')}` : ps.total < 4 ? '<p class="muted small">Nach 4 Check-ins sage ich dir, welche Muskeln du trotz Training kaum spürst.</p>' : ''}</div>`;
+  }
   const good = r.exercises.filter(x => x.state === 'up');
   if (good.length) h += `<h2>Läuft gut</h2><div class="card cc-good">${good.map(x => `<a href="#/fortschritt/uebung/${encodeURIComponent(x.key)}">${icon('stUp')}${esc(x.name)}</a>`).join('')}</div>`;
   // Plan-Check
@@ -718,6 +759,7 @@ function viewCoach() {
   checks.push([avg >= r.goal * 0.75, `Regelmäßigkeit: Ø ${fmtNum(round1(avg))} von ${r.goal} Trainings pro Woche`, `letzte 4 Wochen: ${r.weeks.join(' · ')}`]);
   const lastS = doneSessions().filter(x => x.kind !== 'baseline').at(-1);
   if (lastS && L.dayFeel(lastS).tough) checks.push([false, `Letztes Training (${fmtDate(lastS.date, 'tiny')}) fühlte sich schwer an`, 'viele „schlecht“-Bewertungen – eher Tagesform: Schlaf, Stress, Essen']);
+  if (L.checkinTrend().bad) checks.push([false, 'Mehrere Trainings fühlten sich insgesamt schlecht an', 'Erholung einplanen: Schlaf, Essen, eventuell eine leichtere Woche']);
   const md = L.maxTestDue();
   checks.push([md.last ? !md.due : null, md.last ? `Maximalkrafttest zuletzt am ${fmtDate(md.last, 'tiny')}` : 'Noch kein Maximalkrafttest', md.last ? (md.due ? 'fällig – unter „Maximalkraft“ starten' : `nächster in ${md.inDays} Tagen`) : 'ermittle deinen Ausgangswert unter „Maximalkraft“']);
   const names = plan.exercises.map(e => normKey(e.name));
@@ -1129,6 +1171,17 @@ $app.addEventListener('click', ev => {
       if (!e) return;
       if (!confirm(`„${e.name}“ im Plan durch „${name}“ ersetzen?\n\nSätze, Pause und Supersatz bleiben gleich. „${name}“ startet mit einem eigenen Verlauf – deine bisherigen Einträge bleiben im Fortschritt unter „Weitere Übungen“ erhalten.`)) return;
       const old = L.swapExercise(plan, e.id, name); save(); rerenderKeepScroll(); toast(`${old} → ${name}`); break;
+    }
+    case 'ci-feel': case 'ci-pump': case 'ci-done': case 'ci-skip': case 'ci-edit': {
+      const rs = resultSession(); if (!rs) return;
+      if (act === 'ci-edit') { editingCheckin = rs.id; if (rs.checkin && rs.checkin.skipped) rs.checkin = {}; rerenderKeepScroll(); return; }
+      if (act === 'ci-skip') { rs.checkin = { skipped: true }; editingCheckin = null; save(); rerenderKeepScroll(); return; }
+      rs.checkin = Object.assign({ pump: [] }, rs.checkin);
+      delete rs.checkin.skipped;
+      if (act === 'ci-feel') rs.checkin.feel = rs.checkin.feel === b.dataset.v ? undefined : b.dataset.v;
+      if (act === 'ci-pump') { const m = b.dataset.m; rs.checkin.pump = rs.checkin.pump.includes(m) ? rs.checkin.pump.filter(x => x !== m) : rs.checkin.pump.concat(m); }
+      if (act === 'ci-done') { rs.checkin.done = true; editingCheckin = null; toast('Danke! Der Coach merkt sich das.'); }
+      save(); rerenderKeepScroll(); return;
     }
     case 'feel': {
       const v = b.dataset.v; ex.feel = ex.feel === v ? undefined : v; save(); refreshFeel(s, +b.dataset.ex);

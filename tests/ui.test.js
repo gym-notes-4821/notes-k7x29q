@@ -158,6 +158,15 @@ const STORE = 'trainingsapp.v1';
   ok(await cls('Bizepscurls') === 's-up' && await cls('Trizeps am Turm 1') === 's-same', '10/11 Bizepscurls und Turm 1 einzeln bewertet');
   ok((await page.locator('.sub').allInnerTexts()).join('|').toUpperCase() === 'SUPERSATZ A|SUPERSATZ B', '10 Zwischenüberschriften Supersatz A/B');
   ok((await prow('Squats').locator('.feel-chip').innerText()).includes('okay') && (await prow('Hammercurls').locator('.feel-chip').innerText()).includes('gut'), 'Auswertung zeigt das Gefühl je Übung');
+  // Coach-Check-in nach dem Training
+  ok(await page.locator('.checkin').count() === 1 && await page.locator('.checkin [data-act=ci-done]').isDisabled(), 'Check-in erscheint, „Fertig“ erst nach einer Angabe');
+  await page.locator('.checkin .feel-btn.f-good').click();
+  await page.locator('.checkin .bm-pick[data-m="chest"] path').first().click();
+  ok(await page.locator('.checkin .bm-pick.sel[data-m="chest"]').count() === 1 && await page.locator('.ci-chips .chip.on', { hasText: 'Brust' }).count() === 1, 'Pump per Tipp auf die Körperansicht (vorne) – Liste zieht mit');
+  await page.locator('.ci-chips .chip', { hasText: 'breiter Rücken' }).click();
+  ok(await page.locator('.checkin .bm-pick.sel[data-m="lats"]').count() === 1, 'Pump per Liste – Körperansicht (hinten) zieht mit');
+  await page.locator('.checkin [data-act=ci-done]').click();
+  { const t = await page.locator('.ci-mini').innerText(); ok(t.includes('gut') && t.includes('Brust') && t.includes('breiter Rücken'), 'Check-in gespeichert und kompakt angezeigt'); }
   ok(await page.locator('.summary').count() === 1 && /\d/.test(await page.locator('.summary').innerText()), 'Auswertung: Zusammenfassung mit Dauer, Sätzen, Gewicht');
   { const t = await page.locator('.pr-box').innerText();
     ok(t.includes('Meiste Wdh. bei 12 kg: 14 (vorher 13)') && t.includes('Höchstes Gewicht: 10 kg × 10 (vorher 7,5 kg)') && !t.includes('Latziehen'), 'Auswertung: Rekorde Bizepscurls und Schulterdrücken, kein Schein-Rekord'); }
@@ -171,6 +180,8 @@ const STORE = 'trainingsapp.v1';
   await go('');
   ok(await page.locator('.tile-main .hint').count() === 0 && (await store()).sessions.filter(s => s.status === 'active').length === 0, 'Unberührtes Training wird beim Verlassen verworfen');
 
+  await go('#/coach'); await page.waitForSelector('.coach-hero');
+  ok((await page.locator('.pump-card').innerText()).includes('Brust (1×)'), 'Coach: Pump-Karte nach dem ersten Check-in');
   // Fortschritt
   await go('#/fortschritt');
   ok(await page.locator('.prow.compact').count() >= 14 && await page.locator('.prow.compact .spark').count() >= 14, 'Fortschritt: kompakte Zeilen mit Mini-Kurve');
@@ -310,6 +321,7 @@ const STORE = 'trainingsapp.v1';
   ok((await p3.locator('.coach-card', { has: p3.locator('.pname', { hasText: /^Kreuzheben$/ }) }).innerText()).includes('Schwächer'), 'Coach: Kreuzheben wird schwächer');
   ok((await p3.locator('.cc-good').innerText()).includes('Latziehen'), 'Coach: Latziehen läuft gut');
   ok(await p3.locator('.cc-check').count() >= 3, 'Coach: Plan-Check');
+  ok(await p3.locator('.pump-card').count() === 0, 'Ohne Check-ins keine Pump-Karte');
   await sqCard.locator('.cc-alt', { hasText: 'Beinpresse' }).click(); await p3.waitForTimeout(150);
   const plan3 = await p3.evaluate(k => JSON.parse(localStorage.getItem(k)).plans[0].exercises.map(e => e.name), STORE);
   ok(plan3[0] === 'Beinpresse' && !plan3.includes('Squats'), 'Coach: Übung per Tipp im Plan getauscht');

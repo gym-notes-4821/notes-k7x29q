@@ -642,6 +642,61 @@ function setNote(key, text) {
   if (t) db.notes[canon(key)] = t; else delete db.notes[canon(key)];
 }
 
+/* ---------------- Check-in nach dem Training (Gefühl & Pump) ---------------- */
+/** Muskeln, die in diesem Training deutlich gearbeitet haben (Haupt- oder deutlich beteiligt). */
+function musclesInSession(session) {
+  const set = new Set();
+  for (const ex of session.exercises) {
+    if (!validSets(ex).length) continue;
+    const m = musclesOf(ex.name) || {};
+    for (const [id, f] of Object.entries(m)) if (f >= 0.5) set.add(id);
+  }
+  return [...set];
+}
+/** Check-ins der letzten n abgeschlossenen Trainings (nur beantwortete). */
+function recentCheckins(n = 8) {
+  return doneSessions().filter(s => s.kind !== 'baseline' && s.checkin && !s.checkin.skipped).slice(-n);
+}
+/**
+ * Pump-Auswertung: wie oft wurde ein Muskel als „Pump“ genannt (bezogen auf Trainings, in denen er trainiert wurde)?
+ * low – im Plan stark trainiert, aber in höchstens 20 % der Check-ins Pump (ab 4 Check-ins)
+ */
+function pumpStats(plan, n = 8) {
+  const ci = recentCheckins(n).filter(s => (s.checkin.pump || []).length);
+  const count = {}, trained = {};
+  for (const s of ci) {
+    for (const m of s.checkin.pump) count[m] = (count[m] || 0) + 1;
+    for (const m of musclesInSession(s)) trained[m] = (trained[m] || 0) + 1;
+  }
+  const total = ci.length;
+  const rate = id => total ? (count[id] || 0) / total : 0;
+  const top = Object.keys(count).sort((a, b) => count[b] - count[a]).slice(0, 4);
+  const load = plan ? planMuscleLoad(plan).load : {};
+  const low = total >= 4 ? MUSCLES.map(([id]) => id).filter(id => muscleLevel(load[id]) === 3 && rate(id) <= 0.2) : [];
+  return { total, count, trained, rate, top, low };
+}
+/** Gesamtgefühl: mindestens 2 der letzten 3 Check-ins „schlecht“. */
+function checkinTrend() {
+  const f = recentCheckins(3).map(s => s.checkin.feel).filter(Boolean);
+  return { bad: f.filter(x => x === 'bad').length >= 2, feels: f };
+}
+/** Tipps, wenn ein Muskel trotz viel Training kaum Pump bekommt. */
+const PUMP_TIPS = {
+  upperback: 'Beim Rudern die Schulterblätter bewusst zusammenziehen und kurz halten.',
+  lats: 'Beim Latziehen die Ellbogen Richtung Hüfte ziehen, nicht mit den Armen „reißen“.',
+  chest: 'Beim Drücken die Schulterblätter nach hinten-unten ziehen, langsam ablassen.',
+  shoulders: 'Seitheben mit leichterem Gewicht, ohne Schwung, kurz oben halten.',
+  reardelts: 'Vorgebeugtes Seitheben leichter, Arme weit nach außen statt nach hinten.',
+  glutes: 'Bei Squats tiefer gehen und oben das Gesäß bewusst anspannen.',
+  quads: 'Squats langsamer ablassen (3 Sekunden), Knie bewusst nach vorne lassen.',
+  hamstrings: 'Beim Kreuzheben die Hüfte weit nach hinten schieben, Dehnung spüren.',
+  biceps: 'Curls ohne Schwung, unten ganz strecken, oben kurz anspannen.',
+  triceps: 'Am Turm unten die Arme ganz durchstrecken und kurz halten.',
+  abs: 'Crunches langsam, Wirbel für Wirbel einrollen, ausatmen.',
+};
+const pumpTip = id => PUMP_TIPS[id] || 'Etwas leichter und langsamer arbeiten, den Muskel bewusst anspannen.';
+const muscleName = id => (MUSCLES.find(([m]) => m === id) || [id, id])[1];
+
 /* ---------------- Maximalkraft (5RM-Test) ---------------- */
 /** Grundübungen, die sich für einen 5RM-Test eignen (Kategorie: 0 Kniebeuge, 1 Drücken, 2 Kreuzheben, 3 Latziehen, 4 Schulterdrücken, 5 Rudern). */
 const MAX_CATEGORIES = [
@@ -960,6 +1015,7 @@ const api = {
   recordsFor, sessionStats, shortDelta, weekCount, noteFor, setNote,
   ALTERNATIVES, alternativesFor, exerciseState, coachReport, estimateMinutes, swapExercise, coachTips,
   FEELS, recentFeels, feelHint, dayFeel,
+  musclesInSession, recentCheckins, pumpStats, checkinTrend, pumpTip, muscleName,
   maxCategory, maxRestBefore, MAX_REPS, currentE1, maxTestPlan, maxTestState, newMaxTest, maxTestHistory, maxTestDue, MUSCLES, musclesOf, planMuscleLoad, muscleLevel, prefillWeights, isUntouched,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;

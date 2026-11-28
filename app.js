@@ -51,6 +51,9 @@ const ICON_PATHS = {
   home: '<path d="M4 10.5L12 4l8 6.5V20a1 1 0 0 1-1 1h-4.5v-6h-5v6H5a1 1 0 0 1-1-1z"/>',
   up: '<path d="M6 15l6-6 6 6"/>',
   down: '<path d="M6 9l6 6 6-6"/>',
+  sound: '<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
+  mute: '<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>',
+  timer: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2M10 3h4"/>',
   link: '<path d="M10 14a4.5 4.5 0 0 0 6.4.4l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.4 1.4"/><path d="M14 10a4.5 4.5 0 0 0-6.4-.4l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.4-1.4"/>',
   // Ampel-Symbole (gefüllt), damit die Bewertung auch ohne Farbe lesbar bleibt
   stUp: '<path d="M12 5.5l7 11H5z" fill="currentColor" stroke-width="1.5"/>',
@@ -215,6 +218,99 @@ function lineChart({ points, forecast = null, unit = '', timeScale = false, zero
   return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Verlaufsgrafik">${g}<polyline points="${line}" class="pline"/>${fc}${dots}</svg>`;
 }
 
+/* ---------------- Pausen-Timer ----------------
+   Startet, sobald ein Satz vollständig eingetragen ist (im Supersatz erst nach der ganzen Runde).
+   Der Endzeitpunkt wird im Training gespeichert, damit der Timer auch nach dem Schließen der App weiterläuft. */
+const fmtRest = sec => sec >= 60 ? `${Math.floor(sec / 60)}:${String(sec % 60).padStart(2, '0')} min` : `${sec} s`;
+const Rest = (() => {
+  const el = document.getElementById('rest');
+  let tick = null, wake = null, audio = null, doneShown = false;
+  const sess = () => { const s = currentSession(); return s && s.status === 'active' ? s : null; };
+  const left = r => Math.ceil((r.endAt - Date.now()) / 1000);
+  const mmss = sec => `${Math.floor(Math.max(0, sec) / 60)}:${String(Math.max(0, sec) % 60).padStart(2, '0')}`;
+  // Ton: Web Audio muss auf dem iPhone einmal durch eine Berührung freigeschaltet werden
+  document.addEventListener('pointerdown', () => {
+    try { audio = audio || new (window.AudioContext || window.webkitAudioContext)(); if (audio.state === 'suspended') audio.resume(); } catch (e) { /* kein Ton */ }
+  }, { passive: true });
+  function beep() {
+    if (!audio || db.settings?.sound === false) return;
+    try {
+      [0, 0.25, 0.5].forEach((t, k) => {
+        const o = audio.createOscillator(), g = audio.createGain();
+        o.frequency.value = k === 2 ? 1320 : 880; o.connect(g); g.connect(audio.destination);
+        const at = audio.currentTime + t;
+        g.gain.setValueAtTime(0.0001, at); g.gain.exponentialRampToValueAtTime(0.4, at + 0.02); g.gain.exponentialRampToValueAtTime(0.0001, at + 0.18);
+        o.start(at); o.stop(at + 0.2);
+      });
+    } catch (e) { /* kein Ton */ }
+    try { navigator.vibrate && navigator.vibrate([200, 100, 200]); } catch (e) { /* iPhone: keine Vibration */ }
+  }
+  async function keepAwake(on) {
+    try {
+      if (on && !wake && navigator.wakeLock) { wake = await navigator.wakeLock.request('screen'); wake.addEventListener('release', () => { wake = null; }); }
+      if (!on && wake) { await wake.release(); wake = null; }
+    } catch (e) { wake = null; }
+  }
+  function nextLabel(fromEl) {
+    const all = [...$app.querySelectorAll('input[data-f="r"]')];
+    const start = fromEl ? all.indexOf(fromEl) + 1 : 0;
+    const nxt = all.slice(Math.max(0, start)).find(x => x.value === '');
+    if (!nxt) return 'Training abschließen';
+    const ex = currentSession().exercises[+nxt.dataset.ex];
+    return `${ex.name} · Satz ${+nxt.dataset.set + 1}`;
+  }
+  function start(sec, label) {
+    const s = sess(); if (!s || !sec) return;
+    s.rest = { endAt: Date.now() + sec * 1000, total: sec, next: label };
+    save(); doneShown = false; keepAwake(true); sync();
+  }
+  function stop() {
+    const s = currentSession(); if (s && s.rest) { delete s.rest; save(); }
+    hide(); keepAwake(false);
+  }
+  function hide() { el.hidden = true; document.body.classList.remove('has-rest'); clearInterval(tick); tick = null; }
+  function draw() {
+    const s = sess(); if (!s || !s.rest) return hide();
+    const r = s.rest, sec = left(r);
+    if (sec <= -8) return stop(); // „Weiter geht's“ nach ein paar Sekunden ausblenden
+    el.querySelector('.rest-time').textContent = sec > 0 ? mmss(sec) : 'Los!';
+    el.querySelector('.rest-label').textContent = sec > 0 ? 'Pause' : 'Weiter geht\'s!';
+    el.querySelector('.rest-next').textContent = r.next ? `Als Nächstes: ${r.next}` : '';
+    el.querySelector('.rest-fill').style.width = `${Math.max(0, Math.min(100, 100 - (sec / r.total) * 100))}%`;
+    el.classList.toggle('done', sec <= 0);
+    el.querySelector('[data-rest="sound"]').innerHTML = icon(db.settings?.sound === false ? 'mute' : 'sound');
+    if (sec <= 0 && !doneShown) { doneShown = true; beep(); }
+  }
+  function sync() {
+    const s = sess();
+    if (!s || !s.rest || left(s.rest) <= -8) { if (s && s.rest) { delete s.rest; save(); } return hide(); }
+    if (left(s.rest) <= 0) doneShown = true; // abgelaufen, während die App zu war: nicht nachträglich piepen
+    el.hidden = false; document.body.classList.add('has-rest');
+    draw();
+    if (!tick) tick = setInterval(draw, 250);
+  }
+  el.addEventListener('click', ev => {
+    const b = ev.target.closest('[data-rest]'); if (!b) return;
+    const s = sess(); if (!s || !s.rest) return;
+    const a = b.dataset.rest;
+    if (a === 'stop') return stop();
+    if (a === 'sound') { db.settings = Object.assign({}, db.settings, { sound: db.settings?.sound === false }); save(); draw(); toast(db.settings.sound ? 'Ton an' : 'Ton aus'); return; }
+    const d = +a;
+    s.rest.endAt = Math.max(Date.now() + 1000, s.rest.endAt + d * 1000);
+    s.rest.total = Math.max(1, s.rest.total + d);
+    doneShown = left(s.rest) <= 0; save(); draw();
+  });
+  document.addEventListener('visibilitychange', () => { if (!document.hidden) { sync(); if (!el.hidden) keepAwake(true); } });
+  return {
+    sync, stop,
+    afterSet(s, i, j, inputElement) {
+      if (s.status !== 'active') return;
+      const sec = L.restAfter(s, i, j);
+      if (sec) start(sec, nextLabel(inputElement));
+    },
+  };
+})();
+
 /* ---------------- Router ---------------- */
 const routes = [
   [/^#?\/?$/, viewHome],
@@ -240,7 +336,7 @@ function render() {
   const h = location.hash || '#/';
   for (const [re, fn] of routes) {
     const m = h.match(re);
-    if (m) { $app.innerHTML = fn(...m.slice(1).map(x => x && decodeURIComponent(x))); return; }
+    if (m) { $app.innerHTML = fn(...m.slice(1).map(x => x && decodeURIComponent(x))); Rest.sync(); return; }
   }
   location.hash = '#/';
 }
@@ -290,7 +386,7 @@ function inputs(i, j, set) {
     <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" enterkeyhint="next" data-f="r" data-ex="${i}" data-set="${j}" value="${set.r ?? ''}" placeholder="Wdh." aria-label="Satz ${j + 1} Wiederholungen">`;
 }
 function singleCard(s, ex, i) {
-  const head = `<div class="ex-head"><h3>${esc(ex.name)}</h3>${ex.perDumbbell ? '<span class="pd">pro Hantel</span>' : ''}</div>`;
+  const head = `<div class="ex-head"><h3>${esc(ex.name)}</h3>${ex.perDumbbell ? '<span class="pd">pro Hantel</span>' : ''}<span class="rest-tag">${icon('timer')}${fmtRest(L.restOf(ex))}</span></div>`;
   if (ex.skipped) return `<section class="ex-card skipped">${head}<p class="last">Übersprungen – zählt nicht als schwächer.</p>
     <div class="ex-actions"><button data-act="unskip" data-ex="${i}">Doch trainieren</button></div></section>`;
   const hasPrev = !!previousEntry(ex.key, s);
@@ -304,7 +400,7 @@ function supersetCard(s, b) {
   const items = b.items;
   const rounds = Math.max(...items.map(it => it.ex.sets.length));
   const prevs = items.map(it => previousEntry(it.ex.key, s));
-  let h = `<section class="ex-card superset"><div class="ss-head"><h3>Supersatz ${esc(b.group)}</h3><span class="muted small">${rounds} Runden · ohne Pause</span></div>
+  let h = `<section class="ex-card superset"><div class="ss-head"><h3>Supersatz ${esc(b.group)}</h3><span class="muted small">${rounds} Runden · ohne Pause dazwischen</span><span class="rest-tag">${icon('timer')}${fmtRest(Math.max(...items.map(it => L.restOf(it.ex))))} nach jeder Runde</span></div>
     <ol class="ss-list">${items.map((it, k) => `<li class="${it.ex.skipped ? 'skipped' : ''}"><div class="ss-li-top"><b>${esc(it.ex.name)}</b>${it.ex.perDumbbell ? '<span class="pd">pro Hantel</span>' : ''}
       ${it.ex.skipped ? `<button class="btn-small" data-act="unskip" data-ex="${it.idx}">Doch trainieren</button>` : `<button class="btn-small" data-act="skip" data-ex="${it.idx}">Überspringen</button>`}</div>
       ${it.ex.skipped ? '<p class="last">Übersprungen – zählt nicht als schwächer.</p>' : lastLine(s, it.ex)}</li>`).join('')}</ol>`;
@@ -544,6 +640,8 @@ function viewSlotEdit(pid, eid) {
     <label class="field"><span>Name</span><input data-slot="name" value="${esc(e.name)}"></label>
     <div class="grid2"><label class="field"><span>Sätze</span><input data-slot="sets" inputmode="numeric" pattern="[0-9]*" value="${e.sets}"></label>
       <label class="field"><span>Orientierungsgewicht (kg)</span><input data-slot="guide" inputmode="decimal" value="${fmtNum(e.guide)}" placeholder="optional"></label></div>
+    <label class="field"><span>${e.group ? `Pause nach jeder Runde in Sekunden (gilt für den ganzen Supersatz ${esc(e.group)})` : 'Pause nach jedem Satz in Sekunden'}</span>
+      <input data-slot="rest" inputmode="numeric" pattern="[0-9]*" value="${L.restOf(e)}"></label>
     <label class="check"><input type="checkbox" data-slot="perDumbbell" ${e.perDumbbell ? 'checked' : ''}> Kurzhantel – Gewicht pro Hantel</label>
     <label class="field" style="margin-top:8px"><span>Supersatz</span><select data-slot="group">
       <option value="">Kein Supersatz (Einzelübung)</option>
@@ -586,9 +684,11 @@ $app.addEventListener('input', ev => {
     const s = currentSession(); if (!s) return;
     const i = +t.dataset.ex, j = +t.dataset.set, set = s.exercises[i].sets[j];
     const v = t.dataset.f === 'w' ? parseNum(t.value) : parseInt0(t.value);
+    const wasValid = isValidSet(set);
     t.classList.toggle('invalid', Number.isNaN(v));
     set[t.dataset.f] = Number.isNaN(v) ? null : v;
     save(); markRow(i, j);
+    if (!wasValid) Rest.afterSet(s, i, j, t);
     // Kurzer Weg: nach vollständiger Wiederholungszahl ins nächste Feld springen
     if (t.dataset.f === 'r' && v != null && !Number.isNaN(v) && (t.value.length >= 2 || v >= 4)) focusNext(t);
     return;
@@ -599,6 +699,11 @@ $app.addEventListener('input', ev => {
     const e = currentSlot(p), f = t.dataset.slot;
     if (f === 'name') { if (t.value.trim()) e.name = t.value.trim(); }
     else if (f === 'guide') { const v = parseNum(t.value); t.classList.toggle('invalid', Number.isNaN(v)); if (!Number.isNaN(v)) e.guide = v; }
+    else if (f === 'rest') {
+      const v = parseInt0(t.value); const ok = v != null && !Number.isNaN(v) && v >= 0 && v <= 600;
+      t.classList.toggle('invalid', !ok);
+      if (ok) { e.rest = v; if (e.group) p.exercises.forEach(x => { if (x.group === e.group) x.rest = v; }); }
+    }
     else if (f === 'sets') { const v = parseInt0(t.value); const ok = v != null && !Number.isNaN(v) && v > 0 && v <= 20; t.classList.toggle('invalid', !ok); if (ok) e.sets = v; }
     else return;
     save();
@@ -634,7 +739,7 @@ $app.addEventListener('change', ev => {
     return;
   }
   if (t.dataset.slot === 'perDumbbell') { currentSlot(p).perDumbbell = t.checked; save(); }
-  if (t.dataset.slot === 'group') { const e = currentSlot(p); e.group = t.value || null; normalizeGroups(p); save(); toast(e.group ? `Zu Supersatz ${e.group} hinzugefügt` : 'Aus Supersatz entfernt'); rerenderKeepScroll(); }
+  if (t.dataset.slot === 'group') { const e = currentSlot(p); e.group = t.value || null; normalizeGroups(p); L.unifyGroupRest(p.exercises); save(); toast(e.group ? `Zu Supersatz ${e.group} hinzugefügt` : 'Aus Supersatz entfernt'); rerenderKeepScroll(); }
 });
 
 // Gewicht beim Betreten des Feldes merken, damit eine Änderung an die Folgesätze weitergegeben werden kann
@@ -664,8 +769,11 @@ $app.addEventListener('click', ev => {
   switch (act) {
     case 'take': {
       const i = +b.dataset.ex, j = +b.dataset.set, set = ex.sets[j];
+      const wasValid = isValidSet(set);
       set.w = parseFloat(b.dataset.w); set.r = parseInt(b.dataset.r, 10);
-      setInput(i, j, 'w', set.w); setInput(i, j, 'r', set.r); save(); markRow(i, j); break;
+      setInput(i, j, 'w', set.w); setInput(i, j, 'r', set.r); save(); markRow(i, j);
+      if (!wasValid) Rest.afterSet(s, i, j, inputEl(i, j, 'r'));
+      break;
     }
     case 'take-all': fillFromPrev(s, +b.dataset.ex); save(); rerenderKeepScroll(); toast('Werte vom letzten Mal übernommen'); break;
     case 'take-group': s.exercises.forEach((e, i) => { if (e.group === b.dataset.group) fillFromPrev(s, i); }); save(); rerenderKeepScroll(); toast('Supersatz vorbefüllt'); break;
@@ -676,7 +784,7 @@ $app.addEventListener('click', ev => {
       const empty = s.exercises.filter(e => !e.skipped && !validSets(e).length);
       if (empty.length && !confirm(`${empty.length} Übung(en) ohne Werte werden als übersprungen gespeichert. Training abschließen?`)) return;
       empty.forEach(e => { e.skipped = true; });
-      s.status = 'done'; s.finishedAt = Date.now(); save();
+      s.status = 'done'; s.finishedAt = Date.now(); delete s.rest; save(); Rest.stop();
       location.hash = `#/ergebnis/${s.id}`; break;
     }
     case 'show-result': location.hash = `#/ergebnis/${s.id}`; break;
@@ -703,7 +811,7 @@ $app.addEventListener('click', ev => {
       if (!next) return;
       p.exercises[i].group = next.group || ('neu-' + L.uid());
       if (!next.group) next.group = p.exercises[i].group;
-      normalizeGroups(p); save(); rerenderKeepScroll(); toast(`Supersatz ${p.exercises[i].group} gebildet`); break;
+      normalizeGroups(p); L.unifyGroupRest(p.exercises); save(); rerenderKeepScroll(); toast(`Supersatz ${p.exercises[i].group} gebildet`); break;
     }
     case 'unlink': p.exercises.forEach(e => { if (e.group === b.dataset.group) e.group = null; }); normalizeGroups(p); save(); rerenderKeepScroll(); toast('Supersatz aufgelöst'); break;
     case 'add-ex': { const e = L.mkPlanEx('Neue Übung', 3, null); p.exercises.push(e); save(); location.hash = `#/plan/${p.id}/uebung/${e.id}`; break; }

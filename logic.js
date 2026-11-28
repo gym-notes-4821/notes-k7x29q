@@ -69,17 +69,49 @@ const START_VALUES = [
   ['Crunches am Kabelzug', null, [], 'B', false, 2, 'gk-13'], // noch ohne Startwerte
 ];
 function mkPlanEx(name, sets, guide, opts = {}) {
-  return { id: opts.id || uid(), name, sets, guide: guide ?? null, perDumbbell: !!opts.perDumbbell, group: opts.group || null };
+  return { id: opts.id || uid(), name, sets, guide: guide ?? null, perDumbbell: !!opts.perDumbbell, group: opts.group || null,
+    rest: opts.rest ?? defaultRest(name) };
+}
+/* ---------------- Pausen ---------------- */
+/** Empfohlene Pause nach einem Satz in Sekunden: schwere Grundübungen länger, Isolationsübungen kürzer. */
+function defaultRest(name) {
+  const n = normKey(name);
+  if (/squat|kniebeuge|hackenschmidt|kreuzheben|deadlift|beinpresse/.test(n)) return 120;
+  if (/latziehen|latzug|klimmz|pull.?up|bankdrücken|bench|brustpresse|rudern(?! aufrecht)|row/.test(n)) return 90;
+  return 60;
+}
+const restOf = ex => ex.rest ?? defaultRest(ex.name);
+/** Gleicht die Pause innerhalb jedes Supersatzes an (die längste gilt für alle). */
+function unifyGroupRest(exs) {
+  const by = {};
+  exs.forEach(e => { if (e.group) by[e.group] = Math.max(by[e.group] || 0, restOf(e)); });
+  exs.forEach(e => { if (e.group) e.rest = by[e.group]; });
+}
+/**
+ * Pause, die nach dem Eintragen von Satz j der Übung i startet – oder null, wenn keine Pause fällig ist:
+ * Im Supersatz geht es ohne Pause zur nächsten Übung; die Pause kommt erst, wenn die ganze Runde eingetragen ist.
+ */
+function restAfter(session, i, j) {
+  const ex = session.exercises[i];
+  if (!ex || !ex.sets[j] || !isValidSet(ex.sets[j])) return null;
+  if (!ex.group) return restOf(ex);
+  const members = session.exercises.filter(e => e.group === ex.group && !e.skipped);
+  if (!members.filter(e => e.sets[j]).every(e => isValidSet(e.sets[j]))) return null;
+  return Math.max(...members.map(restOf));
 }
 function defaultPlan() {
   return {
     id: START_PLAN_ID, name: 'Ganzkörperplan',
-    exercises: START_VALUES.map(([name, w, reps, group, pd, sets, id], i) => mkPlanEx(name, sets || reps.length, w, { id: id || `gk-${i + 1}`, group, perDumbbell: pd })),
+    exercises: (() => {
+      const exs = START_VALUES.map(([name, w, reps, group, pd, sets, id], i) => mkPlanEx(name, sets || reps.length, w, { id: id || `gk-${i + 1}`, group, perDumbbell: pd }));
+      unifyGroupRest(exs);
+      return exs;
+    })(),
   };
 }
 function snapshotEx(pe) {
   return { slotId: pe.id, name: pe.name, key: normKey(pe.name), group: pe.group || null, perDumbbell: !!pe.perDumbbell,
-    guide: pe.guide ?? null, targetSets: pe.sets, skipped: false, sets: Array.from({ length: pe.sets }, () => ({ w: null, r: null })) };
+    guide: pe.guide ?? null, rest: pe.rest ?? defaultRest(pe.name), targetSets: pe.sets, skipped: false, sets: Array.from({ length: pe.sets }, () => ({ w: null, r: null })) };
 }
 function newSession(plan, date) {
   return { id: uid(), planId: plan.id, planName: plan.name, date: date || todayISO(), createdAt: Date.now(),
@@ -93,7 +125,7 @@ function baselineSession(plan, date) {
 }
 function freshDb() {
   const plan = defaultPlan();
-  return { version: DATA_VERSION, plans: [plan], sessions: [baselineSession(plan)], activePlanId: plan.id, lastExport: null };
+  return { version: DATA_VERSION, plans: [plan], sessions: [baselineSession(plan)], activePlanId: plan.id, lastExport: null, settings: { sound: true } };
 }
 
 /* ---------------- Migration ---------------- */
@@ -142,7 +174,7 @@ function renameInStartPlan(d, oldName, newName) {
   }
 }
 const validDb = d => !!d && Array.isArray(d.plans) && Array.isArray(d.sessions);
-const DATA_VERSION = 9;
+const DATA_VERSION = 10;
 /** Bringt Daten beliebiger älterer Version auf die aktuelle Version. Selbst eingetragene Trainings bleiben unverändert. */
 function migrate(input) {
   if (!validDb(input)) throw new Error('Ungültiges Datenformat');
@@ -278,6 +310,15 @@ function migrate(input) {
       }
     }
     d.version = 9;
+  }
+  if (d.version < 10) {
+    // Version 10: Pausenzeiten je Übung (für den Pausen-Timer), im Supersatz einheitlich; Ton an.
+    for (const p of d.plans) {
+      p.exercises.forEach(e => { if (e.rest == null) e.rest = defaultRest(e.name); });
+      unifyGroupRest(p.exercises);
+    }
+    d.settings = Object.assign({ sound: true }, d.settings);
+    d.version = 10;
   }
   if (!d.plans.some(p => p.id === d.activePlanId)) d.activePlanId = d.plans[0] ? d.plans[0].id : null;
   return d;
@@ -603,7 +644,7 @@ const muscleLevel = v => !v ? 0 : v >= 4 ? 3 : v >= 2 ? 2 : 1;
 
 const api = {
   uid, normKey, round2, round1, pad, todayISO, dayNum, addDaysISO, parseNum, parseInt0, fmtNum, fmtSet, fmtSets, fmtPct, fmtDate, repWord, e1rm,
-  START_PLAN_ID, START_VALUES, DATA_VERSION, mkPlanEx, defaultPlan, snapshotEx, newSession, baselineSession, freshDb, validDb, migrate,
+  START_PLAN_ID, START_VALUES, DATA_VERSION, defaultRest, restOf, restAfter, unifyGroupRest, mkPlanEx, defaultPlan, snapshotEx, newSession, baselineSession, freshDb, validDb, migrate,
   setDb, getDb, canon, sameEx, renameExercise, sessionOrder, doneSessions, isValidSet, validSets, bestE1, bestSetByE1, exerciseHistory, previousEntry,
   rankSets, cmpPair, compareSets, diffText, explain, trendFor, analyzeExercise, latestProgress, planProgress,
   forecastFor, forecastText, planForecast, blocks, normalizeGroups, MAX_WEEKLY, MUSCLES, musclesOf, planMuscleLoad, muscleLevel, prefillWeights, isUntouched,

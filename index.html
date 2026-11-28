@@ -18,6 +18,18 @@
 </head>
 <body>
 <main id="app"></main>
+<div id="rest" class="rest" hidden role="timer" aria-live="polite">
+  <div class="rest-bar"><div class="rest-fill"></div></div>
+  <div class="rest-row">
+    <button data-rest="-15" aria-label="15 Sekunden weniger">−15</button>
+    <div class="rest-mid"><span class="rest-label">Pause</span><b class="rest-time">0:00</b><span class="rest-next"></span></div>
+    <button data-rest="15" aria-label="15 Sekunden mehr">+15</button>
+  </div>
+  <div class="rest-row rest-row2">
+    <button data-rest="sound" class="rest-sound" aria-label="Ton an oder aus"></button>
+    <button data-rest="stop" class="rest-stop">Pause beenden</button>
+  </div>
+</div>
 <div id="toast" role="status" aria-live="polite"></div>
 <script src="logic.js"></script>
 <script src="app.js"></script>

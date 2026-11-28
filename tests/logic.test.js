@@ -222,6 +222,24 @@ test('Muskelbereiche: Belastung je Plan = Sätze × Beteiligung, mit Stufen', ()
   assert.strictEqual(L.muscleLevel(std.chest), 3); assert.strictEqual(L.muscleLevel(std.glutes), 3);
   assert.strictEqual(L.muscleLevel(std.calves), 1);
 });
+test('Pausen: Grundübungen länger, Supersatz erst nach der ganzen Runde', () => {
+  assert.deepStrictEqual(['Squats', 'Kreuzheben', 'Latziehen', 'Rudern sitzend', 'Bankdrücken mit Kurzhanteln', 'Butterfly mit Kurzhanteln', 'Seitheben', 'Rudern aufrecht'].map(L.defaultRest),
+    [120, 120, 90, 90, 90, 60, 60, 60]);
+  const db = L.freshDb(); L.setDb(db);
+  const s = L.newSession(db.plans[0], today);
+  const idx = n => s.exercises.findIndex(e => e.name === n);
+  assert.strictEqual(L.restAfter(s, 0, 0), null, 'leerer Satz: keine Pause');
+  s.exercises[0].sets[0] = { w: 10, r: 12 };
+  assert.strictEqual(L.restAfter(s, 0, 0), 120);
+  const A = ['Bizepscurls', 'Trizeps am Turm 1', 'Seitheben', 'Vorgebeugtes Seitheben'];
+  s.exercises[idx('Bizepscurls')].sets[0] = { w: 12, r: 13 };
+  assert.strictEqual(L.restAfter(s, idx('Bizepscurls'), 0), null, 'Runde noch nicht fertig');
+  s.exercises[idx('Trizeps am Turm 1')].sets[0] = { w: 18, r: 13 };
+  s.exercises[idx('Seitheben')].sets[0] = { w: 5, r: 13 };
+  s.exercises[idx('Vorgebeugtes Seitheben')].skipped = true;   // übersprungene Übung zählt nicht
+  assert.strictEqual(L.restAfter(s, idx('Seitheben'), 0), 60, 'Runde komplett');
+  assert.ok(A.every(n => db.plans[0].exercises.find(e => e.name === n).rest === 60));
+});
 const v1 = require('./v1-sample.json'); // Daten im alten Format (Version 1)
 test('Migration: Version 1 lädt ohne Fehler, Trainings bleiben erhalten', () => {
   const d = L.migrate(v1); L.setDb(d);
@@ -419,6 +437,16 @@ test('Migration Version 8 → 9: Drücken/Ziehen abwechselnd, Butterfly 2 Sätze
   assert.deepStrictEqual(a2.exercises.slice(0, 7).map(e => e.name), ['Hackenschmidt'].concat(want.slice(1)));
   assert.strictEqual(exOf(a2, 'Butterfly mit Kurzhanteln').sets.length, 2);
   assert.ok(L.isUntouched(a2));
+});
+test('Migration Version 9 → 10: Pausenzeiten und Ton-Einstellung', () => {
+  const old = L.freshDb(); old.version = 9; delete old.settings;
+  old.plans[0].exercises.forEach(e => { delete e.rest; });
+  old.plans.push({ id: 'x', name: 'Eigener', exercises: [{ id: 'a', name: 'Beinpresse', sets: 3, guide: null, perDumbbell: false, group: 'A' }, { id: 'b', name: 'Wadenheben', sets: 3, guide: null, perDumbbell: false, group: 'A' }] });
+  const d = L.migrate(old);
+  assert.strictEqual(d.version, L.DATA_VERSION);
+  assert.deepStrictEqual(d.settings, { sound: true });
+  assert.strictEqual(d.plans[0].exercises[0].rest, 120);
+  assert.deepStrictEqual(d.plans[1].exercises.map(e => e.rest), [120, 120], 'Supersatz: längste Pause gilt für alle');
 });
 test('Migration ist wiederholbar (keine doppelten Startwerte)', () => {
   const d = L.migrate(L.migrate(v1));

@@ -292,3 +292,32 @@ svg .dot { fill: var(--accent); }
 .bm-dot.bm-1 { background: rgba(57,255,20,.28); }
 .bm-dot.bm-2 { background: rgba(57,255,20,.6); }
 .bm-dot.bm-3 { background: #39ff14; box-shadow: 0 0 6px rgba(57,255,20,.7); }
+
+/* ---------------- Pausen-Timer ---------------- */
+.rest-tag { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 700; color: var(--muted);
+  padding: 2px 8px; border-radius: 99px; background: var(--card2); white-space: nowrap; }
+.rest-tag .i { width: 13px; height: 13px; }
+.rest {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 25;
+  background: rgba(8,8,8,.97); border-top: 2px solid var(--accent); box-shadow: 0 -8px 30px rgba(57,255,20,.15);
+  padding: 0 max(14px, env(safe-area-inset-left)) calc(10px + var(--safe-b)) max(14px, env(safe-area-inset-right));
+  backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px);
+}
+.rest[hidden] { display: none; }
+.rest-bar { height: 5px; margin: 0 calc(-1 * max(14px, env(safe-area-inset-left))) 8px; background: #1c1c1c; }
+.rest-fill { height: 100%; width: 0; background: var(--accent); box-shadow: 0 0 8px rgba(57,255,20,.7); transition: width .25s linear; }
+.rest-row { display: grid; grid-template-columns: 72px 1fr 72px; align-items: center; gap: 10px; max-width: 640px; margin: 0 auto; }
+.rest-row > button { min-height: 56px; font-size: 18px; font-weight: 800; }
+.rest-mid { display: flex; flex-direction: column; align-items: center; line-height: 1.1; min-width: 0; }
+.rest-label { font-size: 13px; color: var(--muted); font-weight: 700; text-transform: uppercase; letter-spacing: .06em; }
+.rest-time { font-size: 46px; font-weight: 900; font-variant-numeric: tabular-nums; color: var(--text); }
+.rest-next { font-size: 13px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+.rest-row2 { grid-template-columns: 56px 1fr; margin-top: 8px; }
+.rest-row2 button { min-height: 48px; font-size: 16px; }
+.rest-sound .i { width: 22px; height: 22px; }
+.rest-stop { background: transparent; border: 1px solid var(--line); }
+.rest.done { border-top-color: var(--accent); animation: restflash 0.9s ease-in-out 3; }
+.rest.done .rest-time, .rest.done .rest-label { color: var(--accent); text-shadow: 0 0 14px rgba(57,255,20,.6); }
+@keyframes restflash { 0%, 100% { background: rgba(8,8,8,.97); } 50% { background: #0d3a05; } }
+body.has-rest #app { padding-bottom: calc(220px + var(--safe-b)); }
+body.has-rest #toast { bottom: calc(210px + var(--safe-b)); }

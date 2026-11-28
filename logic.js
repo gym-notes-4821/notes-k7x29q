@@ -59,7 +59,7 @@ const START_VALUES = [
   ['Latziehen', 45, [12, 12, 10], null, false],
   ['Butterfly mit Kurzhanteln', 12.5, [12, 11, 9], null, true],
   ['Rudern sitzend', 20, [12, 12, 12], null, false], // Rudern im Sitzen an der Maschine
-  ['Schulterdrücken', 7.5, [12, 12, 10], null, true],
+  ['Schulterdrücken', 7.5, [12, 12, 10], null, true, 2],
   ['Bizepscurls', 12, [13, 13], 'A', true],
   ['Trizeps am Turm 1', 18, [13, 13], 'A', false],
   ['Seitheben', 5, [13, 13], 'A', true],
@@ -142,7 +142,7 @@ function renameInStartPlan(d, oldName, newName) {
   }
 }
 const validDb = d => !!d && Array.isArray(d.plans) && Array.isArray(d.sessions);
-const DATA_VERSION = 7;
+const DATA_VERSION = 8;
 /** Bringt Daten beliebiger älterer Version auf die aktuelle Version. Selbst eingetragene Trainings bleiben unverändert. */
 function migrate(input) {
   if (!validDb(input)) throw new Error('Ungültiges Datenformat');
@@ -237,6 +237,23 @@ function migrate(input) {
     // Version 7: vorgebeugtes Seitheben (hintere Schulter) direkt nach dem Seitheben, im selben Supersatz.
     addToStartPlan(d, mkPlanEx('Vorgebeugtes Seitheben', 2, null, { id: 'gk-14', perDumbbell: true }), 'seitheben');
     d.version = 7;
+  }
+  if (d.version < 8) {
+    // Version 8: Schulterdrücken mit 2 statt 3 Sätzen (vordere Schulter entlasten).
+    const plan = d.plans.find(p => p.id === START_PLAN_ID);
+    const e = plan && plan.exercises.find(x => normKey(x.name) === 'schulterdrücken');
+    if (e && e.sets === 3) {
+      e.sets = 2;
+      for (const s of d.sessions) {
+        if (s.status !== 'active' || s.planId !== START_PLAN_ID) continue;
+        const ex = s.exercises.find(x => x.key === 'schulterdrücken');
+        if (!ex || ex.sets.length !== 3 || ex.sets[2].r != null) continue;
+        const wasUntouched = s.prefill && isUntouched(s);
+        ex.sets.pop(); ex.targetSets = 2;
+        if (wasUntouched) s.prefill = weightSignature(s);
+      }
+    }
+    d.version = 8;
   }
   if (!d.plans.some(p => p.id === d.activePlanId)) d.activePlanId = d.plans[0] ? d.plans[0].id : null;
   return d;

@@ -30,7 +30,7 @@ test('Standardplan: 14 Übungen in richtiger Reihenfolge, Supersätze A/B', () =
   assert.deepStrictEqual(p.exercises.map(e => e.name), ['Squats', 'Kreuzheben', 'Bankdrücken mit Kurzhanteln', 'Latziehen',
     'Butterfly mit Kurzhanteln', 'Rudern sitzend', 'Schulterdrücken', 'Bizepscurls', 'Trizeps am Turm 1', 'Seitheben', 'Vorgebeugtes Seitheben', 'Hammercurls', 'Trizeps am Turm 2', 'Crunches am Kabelzug']);
   assert.deepStrictEqual(p.exercises.map(e => e.group || '-').join(''), '-------AAAABBB');
-  assert.deepStrictEqual(p.exercises.map(e => e.sets), [3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2]);
+  assert.deepStrictEqual(p.exercises.map(e => e.sets), [3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2, 2, 2, 2]);
   assert.strictEqual(new Set(p.exercises.map(e => e.id)).size, p.exercises.length, 'IDs eindeutig');
   assert.deepStrictEqual(p.exercises.slice(2, 7).map(e => e.guide), [17.5, 45, 12.5, 20, 7.5]);
   assert.strictEqual(db.activePlanId, p.id);
@@ -382,6 +382,19 @@ test('Migration Version 6 → 7: vorgebeugtes Seitheben nach Seitheben in Supers
   assert.ok(!d.sessions.find(s => s.id === real.id).exercises.some(e => e.name === 'Vorgebeugtes Seitheben'), 'abgeschlossenes Training unverändert');
   assert.strictEqual(L.exerciseHistory('vorgebeugtes seitheben').length, 0, 'eigener, neuer Verlauf');
   assert.strictEqual(L.muscleLevel(L.planMuscleLoad(p).load.reardelts), 3, 'hintere Schulter jetzt stark');
+});
+test('Migration Version 7 → 8: Schulterdrücken mit 2 Sätzen, Startwerte und Trainings unverändert', () => {
+  const old = L.freshDb(); L.setDb(old);
+  old.plans[0].exercises.find(e => e.name === 'Schulterdrücken').sets = 3;
+  old.version = 7;
+  const act = L.prefillWeights(L.newSession(old.plans[0], today)); old.sessions.push(act);
+  assert.strictEqual(exOf(act, 'Schulterdrücken').sets.length, 3);
+  const d = L.migrate(old); L.setDb(d);
+  assert.strictEqual(d.plans[0].exercises.find(e => e.name === 'Schulterdrücken').sets, 2);
+  const a2 = d.sessions.find(s => s.id === act.id);
+  assert.deepStrictEqual(exOf(a2, 'Schulterdrücken').sets.map(x => x.w), [7.5, 7.5]);
+  assert.ok(L.isUntouched(a2));
+  assert.strictEqual(exOf(d.sessions.find(s => s.kind === 'baseline'), 'Schulterdrücken').sets.length, 3, 'Startwerte unverändert');
 });
 test('Migration ist wiederholbar (keine doppelten Startwerte)', () => {
   const d = L.migrate(L.migrate(v1));

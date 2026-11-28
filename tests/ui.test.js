@@ -41,7 +41,7 @@ const STORE = 'trainingsapp.v1';
   await go(''); await page.click('.tile-main'); await page.waitForSelector('.ex-card');
   const names = await page.evaluate(() => [...document.querySelectorAll('.ex-card h3, .ss-li-top b')].map(e => e.textContent));
   ok(JSON.stringify(names) === JSON.stringify(['Squats', 'Kreuzheben', 'Bankdrücken mit Kurzhanteln', 'Latziehen', 'Butterfly mit Kurzhanteln',
-    'Rudern aufrecht', 'Schulterdrücken', 'Supersatz A', 'Bizepscurls', 'Trizeps am Turm 1', 'Seitheben', 'Supersatz B', 'Hammercurls', 'Trizeps am Turm 2']), '2 12 Übungen in richtiger Reihenfolge (mit Supersatz-Karten)');
+    'Rudern aufrecht', 'Schulterdrücken', 'Supersatz A', 'Bizepscurls', 'Trizeps am Turm 1', 'Seitheben', 'Supersatz B', 'Hammercurls', 'Trizeps am Turm 2', 'Crunches am Kabelzug']), '2 13 Übungen in richtiger Reihenfolge (mit Supersatz-Karten)');
   const card = n => page.locator('.ex-card:not(.superset)', { has: page.locator('h3', { hasText: n }) });
   const latLast = await card('Latziehen').locator('.last').innerText();
   ok(/^Letztes Mal \(Startwerte, \d\d\.\d\d\.\): 45 kg × 12 \/ 12 \/ 10$/.test(latLast), '2 „Letztes Mal“ zeigt Startwerte: ' + latLast);
@@ -96,7 +96,7 @@ const STORE = 'trainingsapp.v1';
   const ssB = page.locator('.superset', { has: page.locator('h3', { hasText: 'Supersatz B' }) });
   await ssB.locator('[data-act=take-group]').click();
   ok(await ssB.locator('input[data-f=w]').first().inputValue() === '12,5', '10 „Wie letztes Mal“ befüllt ganzen Supersatz (12,5)');
-  await ssB.locator('input[data-f=r]').nth(2).fill('13'); // Hammercurls R2: 13 statt 12
+  await ssB.locator('input[data-f=r]').nth(3).fill('13'); // Hammercurls R2: 13 statt 12 (R1: Hammer, Turm 2, Crunches)
   await shot(page, '2-supersatz-vor-reload');
   // 4. Neu laden
   await page.reload(); await page.waitForSelector('.ex-card');
@@ -198,7 +198,7 @@ const STORE = 'trainingsapp.v1';
   ok(await page.locator('.plan-group').count() === 2, 'Supersatz wieder gebildet');
   await page.locator('.plan-group').first().locator('.plan-ex').nth(0).locator('[data-act=move-in][data-d="1"]').click();
   const p = (await store()).plans[0];
-  ok(p.exercises.slice(7).map(e => e.name + e.group).join(',') === 'Trizeps am Turm 1A,BizepscurlsA,SeitbehenA'.replace('Seitbehen', 'Seitheben') + ',HammercurlsB,Trizeps am Turm 2B', 'Reihenfolge im Supersatz geändert');
+  ok(p.exercises.slice(7).map(e => e.name + (e.group || '')).join(',') === 'Trizeps am Turm 1A,BizepscurlsA,SeithebenA,HammercurlsB,Trizeps am Turm 2B,Crunches am Kabelzug', 'Reihenfolge im Supersatz geändert');
   // Umbenennen mit Rückfrage: Verlauf weiterführen (Dialog wird im Test bestätigt)
   await page.locator('.plan-ex a', { hasText: 'Latziehen' }).click(); await page.waitForSelector('[data-slot=name]');
   await page.locator('[data-slot=name]').focus();
@@ -240,7 +240,7 @@ const STORE = 'trainingsapp.v1';
   await p2.evaluate(([k, d]) => localStorage.setItem(k, JSON.stringify(d)), [STORE, v1]);
   await p2.reload(); await p2.waitForSelector('.tile');
   const d2 = await p2.evaluate(k => JSON.parse(localStorage.getItem(k)), STORE);
-  ok(err2 === 0 && d2.version === 4 && d2.sessions.some(s => s.id === 'old1'), '8 Version-1-Daten laden ohne Fehler, alte Trainings erhalten');
+  ok(err2 === 0 && d2.version === 5 && d2.sessions.some(s => s.id === 'old1'), '8 Version-1-Daten laden ohne Fehler, alte Trainings erhalten');
   await p2.goto(URL + '#/fortschritt'); await p2.waitForSelector('.prow');
   ok(await p2.locator('h2', { hasText: 'Weitere Übungen' }).count() === 1, '8 Alte Übungen bleiben als „Weitere Übungen“ erreichbar');
   await p2.goto(URL + '#/fortschritt/uebung/latziehen'); await p2.waitForSelector('.hist');

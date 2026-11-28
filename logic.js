@@ -65,6 +65,7 @@ const START_VALUES = [
   ['Seitheben', 5, [13, 13], 'A', true],
   ['Hammercurls', 12.5, [13, 12], 'B', true],
   ['Trizeps am Turm 2', 18, [13, 10], 'B', false],
+  ['Crunches am Kabelzug', null, [], 'B', false, 2], // noch ohne Startwerte
 ];
 function mkPlanEx(name, sets, guide, opts = {}) {
   return { id: opts.id || uid(), name, sets, guide: guide ?? null, perDumbbell: !!opts.perDumbbell, group: opts.group || null };
@@ -96,7 +97,7 @@ function freshDb() {
 
 /* ---------------- Migration ---------------- */
 const validDb = d => !!d && Array.isArray(d.plans) && Array.isArray(d.sessions);
-const DATA_VERSION = 4;
+const DATA_VERSION = 5;
 /** Bringt Daten beliebiger älterer Version auf die aktuelle Version. Selbst eingetragene Trainings bleiben unverändert. */
 function migrate(input) {
   if (!validDb(input)) throw new Error('Ungültiges Datenformat');
@@ -174,6 +175,25 @@ function migrate(input) {
       }
     }
     d.version = 4;
+  }
+  if (d.version < 5) {
+    // Version 5: Crunches am Kabelzug als letzte Übung in Supersatz B (2 Sätze, ohne Startgewicht).
+    const NAME = 'Crunches am Kabelzug', KEY = normKey(NAME);
+    const plan = d.plans.find(p => p.id === START_PLAN_ID);
+    if (plan && !plan.exercises.some(e => normKey(e.name) === KEY)) {
+      const pe = mkPlanEx(NAME, 2, null, { id: 'gk-13', group: plan.exercises.some(e => e.group === 'B') ? 'B' : null });
+      const lastB = plan.exercises.map(e => e.group).lastIndexOf('B');
+      plan.exercises.splice(lastB >= 0 ? lastB + 1 : plan.exercises.length, 0, pe);
+      // auch in ein gerade offenes Training übernehmen (an derselben Stelle)
+      for (const s of d.sessions) {
+        if (s.status !== 'active' || s.planId !== START_PLAN_ID || s.exercises.some(e => e.key === KEY)) continue;
+        const wasUntouched = s.prefill && isUntouched(s);
+        const i = s.exercises.map(e => e.group).lastIndexOf('B');
+        s.exercises.splice(i >= 0 ? i + 1 : s.exercises.length, 0, snapshotEx(pe));
+        if (wasUntouched) s.prefill = weightSignature(s);
+      }
+    }
+    d.version = 5;
   }
   if (!d.plans.some(p => p.id === d.activePlanId)) d.activePlanId = d.plans[0] ? d.plans[0].id : null;
   return d;

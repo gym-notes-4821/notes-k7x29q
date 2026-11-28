@@ -147,6 +147,9 @@ const STORE = 'trainingsapp.v1';
   ok(await cls('Seitheben') === 's-grey', '11 Seitheben grau');
   ok(await cls('Bizepscurls') === 's-up' && await cls('Trizeps am Turm 1') === 's-same', '10/11 Bizepscurls und Turm 1 einzeln bewertet');
   ok((await page.locator('.sub').allInnerTexts()).join('|').toUpperCase() === 'SUPERSATZ A|SUPERSATZ B', '10 Zwischenüberschriften Supersatz A/B');
+  ok(await page.locator('.summary').count() === 1 && /\d/.test(await page.locator('.summary').innerText()), 'Auswertung: Zusammenfassung mit Dauer, Sätzen, Gewicht');
+  { const t = await page.locator('.pr-box').innerText();
+    ok(t.includes('Meiste Wdh. bei 12 kg: 14 (vorher 13)') && t.includes('Höchstes Gewicht: 10 kg × 10 (vorher 7,5 kg)') && !t.includes('Latziehen'), 'Auswertung: Rekorde Bizepscurls und Schulterdrücken, kein Schein-Rekord'); }
   await shot(page, '3-auswertung', true);
 
   // Nächstes Training: kg aus dem gerade abgeschlossenen Training vorausgefüllt
@@ -159,18 +162,33 @@ const STORE = 'trainingsapp.v1';
 
   // Fortschritt
   await go('#/fortschritt');
+  ok(await page.locator('.prow.compact').count() >= 14 && await page.locator('.prow.compact .spark').count() >= 14, 'Fortschritt: kompakte Zeilen mit Mini-Kurve');
+  ok((await prow('Latziehen').locator('.c-delta').innerText()) === '+2 Wdh. bei 45 kg', 'Fortschritt: Kurztext „+2 Wdh. bei 45 kg“');
   ok(await page.locator('.chart-wrap svg .pline').count() === 1, '4 Fortschrittsgrafik vorhanden');
   ok(await cls('Latziehen') === 's-up' && await cls('Seitheben') === 's-grey', '4 Fortschritt mit Ampel');
   await shot(page, '4-fortschritt', true);
   await prow('Latziehen').click(); await page.waitForSelector('.hist');
-  ok(await page.locator('.hist tr').count() === 3 && await page.locator('.chart-wrap svg circle').count() === 2, '4 Detailansicht: Tabelle + 1RM-Grafik');
+  ok(await page.locator('.hist tr').count() === 3 && await page.locator('.chart-wrap svg circle.dot').count() === 2, '4 Detailansicht: Tabelle + 1RM-Grafik');
+  await page.locator('.chart-wrap svg circle.hit').last().click();
+  ok(/^\d\d\.\d\d\.: [\d,]+ kg$/.test(await page.locator('.chart-tip').innerText()), 'Grafik: Punkt antippen zeigt Datum und Wert');
+  await page.click('.detail-note [data-act=note]'); await page.fill('.note-input', 'Sitz 4, Griff breit'); await page.locator('.note-input').blur(); await page.waitForTimeout(100);
+  ok((await page.locator('.detail-note').innerText()).includes('Sitz 4, Griff breit'), 'Notiz in der Detailansicht gespeichert');
   await page.click('[data-act=chart-mode][data-m="45"]');
   ok((await page.locator('.chart-title').innerText()).includes('Wiederholungen bei 45 kg'), '4 Umschalten auf Wdh. bei 45 kg');
 
+  // Notiz im Training, Aufwärmsatz und Wochenziel
+  await go('#/training'); await page.waitForSelector('.ex-card');
+  ok((await card('Latziehen').locator('.note-line').innerText()).includes('Sitz 4'), 'Notiz erscheint im Training');
+  await card('Latziehen').locator('[data-act=add-warm]').click();
+  ok(await card('Latziehen').locator('.set-row.warm').count() === 1 && await card('Latziehen').locator('.set-row.warm input[data-f=w]').inputValue() === '22,5', 'Aufwärmsatz mit halbem Gewicht (22,5)');
+  await card('Latziehen').locator('[data-act=del-warm]').click();
+  ok(await card('Latziehen').locator('.set-row.warm').count() === 0, 'Aufwärmsatz wieder entfernt');
+  await page.click('[data-act=discard]'); await page.waitForTimeout(150);
+  ok(/Diese Woche/.test(await page.locator('.week').innerText()) && await page.locator('.wdot.on').count() >= 1, 'Startseite: Wochenziel mit erledigtem Training');
   // 7. Ausblick mit 2 Trainings
   await go('#/ausblick');
   ok((await page.locator('.prow', { hasText: 'Latziehen' }).innerText()).includes('Für eine Prognose brauche ich mindestens 3 Trainings.'), '7 Mit 2 Trainings: Hinweistext');
-  ok((await page.locator('.note').innerText()).includes('Grobe Schätzung bei gleichbleibendem Tempo'), '7 Hinweis zur groben Schätzung sichtbar');
+  ok((await page.locator('.note').innerText()).includes('Grobe Schätzung'), '7 Hinweis zur groben Schätzung sichtbar');
   ok(await page.locator('.seg button.on').innerText() === '6 Monate', '7 Standardzeitraum 6 Monate');
   // Daten zeitlich auseinanderziehen + drittes Training ergänzen
   await page.evaluate(k => {
@@ -243,6 +261,12 @@ const STORE = 'trainingsapp.v1';
   await page.setInputFiles('input[data-act=import]', file); await page.waitForTimeout(300);
   ok(JSON.stringify(await store()) === JSON.stringify(exported), '9 Export → Import ergibt denselben Datenstand');
 
+  // Nichts darf breiter als der Bildschirm sein (sonst verkleinert Safari die Seite)
+  for (const h of ['', '#/training', '#/plaene', '#/fortschritt', '#/ausblick', '#/trainings', '#/plan/plan-ganzkoerper-v2']) {
+    await go(h); await page.waitForTimeout(150);
+    const sw = await page.evaluate(() => document.documentElement.scrollWidth);
+    ok(sw <= 390, `Keine Überbreite: ${h || 'Startseite'} (${sw}px)`);
+  }
   // Offline
   await go(''); await page.waitForTimeout(800);
   await ctx.setOffline(true); await page.reload();
@@ -258,7 +282,7 @@ const STORE = 'trainingsapp.v1';
   await p2.evaluate(([k, d]) => localStorage.setItem(k, JSON.stringify(d)), [STORE, v1]);
   await p2.reload(); await p2.waitForSelector('.tile');
   const d2 = await p2.evaluate(k => JSON.parse(localStorage.getItem(k)), STORE);
-  ok(err2 === 0 && d2.version === 10 && d2.sessions.some(s => s.id === 'old1'), '8 Version-1-Daten laden ohne Fehler, alte Trainings erhalten');
+  ok(err2 === 0 && d2.version === 11 && d2.sessions.some(s => s.id === 'old1'), '8 Version-1-Daten laden ohne Fehler, alte Trainings erhalten');
   await p2.goto(URL + '#/fortschritt'); await p2.waitForSelector('.prow');
   ok(await p2.locator('h2', { hasText: 'Weitere Übungen' }).count() === 1, '8 Alte Übungen bleiben als „Weitere Übungen“ erreichbar');
   await p2.goto(URL + '#/fortschritt/uebung/latziehen'); await p2.waitForSelector('.hist');

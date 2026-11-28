@@ -142,15 +142,22 @@ test('Ausblick: plausible, gerundete Prognose (2,5 kg / 1 kg) über Datum', () =
   assert.strictEqual(h.w % 1, 0, String(h.w));
   console.log('   Beispiel: ' + txt + ' | ' + L.forecastText('Hammercurls', h, 182));
 });
-test('Ausblick: Deckelung auf +2 % pro Woche', () => {
+test('Ausblick: Deckelung auf +1 % pro Woche, mit der Zeit abflachend', () => {
   const db = L.freshDb(); L.setDb(db);
   db.sessions[0].date = L.addDaysISO(today, -14);
   addTraining(db, L.addDaysISO(today, -7), { 'Latziehen': [[55, 12], [55, 12], [55, 12]] });
   addTraining(db, today, { 'Latziehen': [[65, 12], [65, 12], [65, 12]] });
   const f = L.forecastFor('latziehen', 182, false);
-  assert.ok(f.capped); assert.ok(Math.abs(f.usedWeeklyPct - 2) < 1e-9);
-  // 26 Wochen × 2 % linear = +52 % => 65 × 1,52 = 98,8 => gerundet 100
-  assert.strictEqual(f.w, 100);
+  assert.ok(f.capped); assert.ok(Math.abs(f.usedWeeklyPct - 1) < 1e-9);
+  // 1 % pro Woche, aber abflachend: nach 26 Wochen wirken nur ca. 10,6 „volle“ Wochen
+  assert.ok(Math.abs(L.effWeeks(182) - 10.63) < 0.01, String(L.effWeeks(182)));
+  assert.ok(f.pct > 10 && f.pct < 11, String(f.pct));
+  assert.strictEqual(f.w, 72.5); // 65 kg × 12 → ca. 72,5 kg × 12 in 6 Monaten
+  // anfangs fast linear: 1 Monat ≈ 4 Wochen × 1 %
+  const m1 = L.forecastFor('latziehen', 30, false);
+  assert.ok(m1.pct > 3.5 && m1.pct < 4.3, String(m1.pct));
+  assert.ok(f.at(91) - f.e0 < (f.at(182) - f.e0), 'steigt weiter');
+  assert.ok((f.at(91) - f.e0) > (f.at(182) - f.at(91)), 'zweites Vierteljahr bringt weniger als das erste');
 });
 test('Ausblick: sinkender Trend => "aktuell kein Anstieg", keine sinkende Prognose', () => {
   const db = L.freshDb(); L.setDb(db);
@@ -239,6 +246,47 @@ test('Pausen: Grundübungen länger, Supersatz erst nach der ganzen Runde', () =
   s.exercises[idx('Vorgebeugtes Seitheben')].skipped = true;   // übersprungene Übung zählt nicht
   assert.strictEqual(L.restAfter(s, idx('Seitheben'), 0), 60, 'Runde komplett');
   assert.ok(A.every(n => db.plans[0].exercises.find(e => e.name === n).rest === 60));
+});
+test('Aufwärmsätze zählen nicht für Vergleich und Vorausfüllen', () => {
+  const db = L.freshDb(); L.setDb(db);
+  const s = addTraining(db, today, { 'Latziehen': [[20, 15], [45, 12], [45, 12], [45, 11]] });
+  exOf(s, 'Latziehen').sets[0].warm = true;
+  assert.deepStrictEqual(L.validSets(exOf(s, 'Latziehen')).map(x => x.w), [45, 45, 45]);
+  const a = L.analyzeExercise(s, exOf(s, 'Latziehen'));
+  assert.strictEqual(a.status, 'up'); assert.strictEqual(a.curCount, 3);
+  const n0 = L.newSession(db.plans[0], today); n0.createdAt = Date.now() + 9999;
+  assert.deepStrictEqual(exOf(L.prefillWeights(n0), 'Latziehen').sets.map(x => x.w), [45, 45, 45], 'Aufwärmsatz nicht übernommen');
+  assert.strictEqual(L.restAfter(s, s.exercises.indexOf(exOf(s, 'Latziehen')), 0), 60, 'kurze Pause nach dem Aufwärmen');
+});
+test('Rekorde: Gewicht, Wiederholungen bei bekanntem Gewicht, sonst 1RM; kein Rekord beim ersten Mal', () => {
+  const db = L.freshDb(); L.setDb(db);
+  const a = addTraining(db, today, { 'Latziehen': [[47.5, 10], [45, 13], [45, 12]], 'Squats': [[10, 12], [10, 12], [10, 8]], 'Crunches am Kabelzug': [[20, 15], [20, 14]] });
+  const rec = n => L.recordsFor(a, exOf(a, n)).map(r => r.type);
+  assert.deepStrictEqual(rec('Latziehen'), ['weight', 'reps']); // 47,5 kg neu; 45 kg × 13 statt × 12
+  assert.deepStrictEqual(rec('Squats'), []);                   // alles gleich wie Startwerte
+  assert.deepStrictEqual(rec('Crunches am Kabelzug'), []);     // erstes Mal: kein Rekord
+  assert.ok(L.recordsFor(a, exOf(a, 'Latziehen'))[0].text.startsWith('Höchstes Gewicht: 47,5 kg × 10'));
+});
+test('Trainingsstatistik und Kurztexte', () => {
+  const db = L.freshDb(); L.setDb(db);
+  const s = addTraining(db, today, { 'Latziehen': [[45, 12], [45, 12], [45, 12]], 'Bankdrücken mit Kurzhanteln': [[17.5, 10]], 'Kreuzheben': [[45, 10], [42.5, 10]] });
+  s.startedAt = 1000; s.finishedAt = 1000 + 62 * 60000;
+  const st = L.sessionStats(s);
+  assert.strictEqual(st.sets, 6); assert.strictEqual(Math.round(st.minutes), 62);
+  assert.strictEqual(st.volume, 45 * 36 + 17.5 * 10 * 2 + 450 + 425);
+  assert.strictEqual(L.shortDelta(L.analyzeExercise(s, exOf(s, 'Latziehen'))), '+2 Wdh. bei 45 kg');
+  assert.ok(L.shortDelta(L.analyzeExercise(s, exOf(s, 'Kreuzheben'))).startsWith('1RM '));
+  assert.strictEqual(L.shortDelta(L.analyzeExercise(s, exOf(s, 'Seitheben'))), 'zuletzt übersprungen');
+  assert.strictEqual(L.weekCount(today), 1);
+});
+test('Notizen hängen am Übungsnamen und folgen Umbenennungen', () => {
+  const db = L.freshDb(); L.setDb(db);
+  L.setNote('latziehen', '  Sitz 4, Griff breit ');
+  assert.strictEqual(L.noteFor('latziehen'), 'Sitz 4, Griff breit');
+  L.renameExercise('Latziehen', 'Latzug');
+  assert.strictEqual(L.noteFor('latzug'), 'Sitz 4, Griff breit', 'Notiz zieht beim Umbenennen mit');
+  assert.strictEqual(L.noteFor('latziehen'), 'Sitz 4, Griff breit', 'auch über den alten Namen auffindbar');
+  L.setNote('latzug', ''); assert.strictEqual(L.noteFor('latzug'), '', 'leere Notiz löscht');
 });
 const v1 = require('./v1-sample.json'); // Daten im alten Format (Version 1)
 test('Migration: Version 1 lädt ohne Fehler, Trainings bleiben erhalten', () => {
@@ -444,7 +492,7 @@ test('Migration Version 9 → 10: Pausenzeiten und Ton-Einstellung', () => {
   old.plans.push({ id: 'x', name: 'Eigener', exercises: [{ id: 'a', name: 'Beinpresse', sets: 3, guide: null, perDumbbell: false, group: 'A' }, { id: 'b', name: 'Wadenheben', sets: 3, guide: null, perDumbbell: false, group: 'A' }] });
   const d = L.migrate(old);
   assert.strictEqual(d.version, L.DATA_VERSION);
-  assert.deepStrictEqual(d.settings, { sound: true });
+  assert.deepStrictEqual(d.settings, { sound: true, weeklyGoal: 3 });
   assert.strictEqual(d.plans[0].exercises[0].rest, 120);
   assert.deepStrictEqual(d.plans[1].exercises.map(e => e.rest), [120, 120], 'Supersatz: längste Pause gilt für alle');
 });

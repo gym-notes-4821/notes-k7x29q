@@ -94,6 +94,7 @@ function unifyGroupRest(exs) {
 function restAfter(session, i, j) {
   const ex = session.exercises[i];
   if (!ex || !ex.sets[j] || !isValidSet(ex.sets[j])) return null;
+  if (ex.sets[j].warm) return Math.min(60, restOf(ex)); // nach dem Aufwärmsatz reicht eine kurze Pause
   if (!ex.group) return restOf(ex);
   const members = session.exercises.filter(e => e.group === ex.group && !e.skipped);
   if (!members.filter(e => e.sets[j]).every(e => isValidSet(e.sets[j]))) return null;
@@ -125,7 +126,7 @@ function baselineSession(plan, date) {
 }
 function freshDb() {
   const plan = defaultPlan();
-  return { version: DATA_VERSION, plans: [plan], sessions: [baselineSession(plan)], activePlanId: plan.id, lastExport: null, settings: { sound: true } };
+  return { version: DATA_VERSION, plans: [plan], sessions: [baselineSession(plan)], activePlanId: plan.id, lastExport: null, settings: { sound: true, weeklyGoal: 3 }, notes: {} };
 }
 
 /* ---------------- Migration ---------------- */
@@ -174,7 +175,7 @@ function renameInStartPlan(d, oldName, newName) {
   }
 }
 const validDb = d => !!d && Array.isArray(d.plans) && Array.isArray(d.sessions);
-const DATA_VERSION = 10;
+const DATA_VERSION = 11;
 /** Bringt Daten beliebiger älterer Version auf die aktuelle Version. Selbst eingetragene Trainings bleiben unverändert. */
 function migrate(input) {
   if (!validDb(input)) throw new Error('Ungültiges Datenformat');
@@ -320,6 +321,12 @@ function migrate(input) {
     d.settings = Object.assign({ sound: true }, d.settings);
     d.version = 10;
   }
+  if (d.version < 11) {
+    // Version 11: Wochenziel und Notizen je Übung
+    d.settings = Object.assign({ sound: true, weeklyGoal: 3 }, d.settings);
+    d.notes = d.notes || {};
+    d.version = 11;
+  }
   if (!d.plans.some(p => p.id === d.activePlanId)) d.activePlanId = d.plans[0] ? d.plans[0].id : null;
   return d;
 }
@@ -343,14 +350,19 @@ const sameEx = (a, b) => canon(a) === canon(b);
 function renameExercise(oldName, newName) {
   const o = normKey(oldName), n = normKey(newName);
   if (!o || !n || o === n) return;
+  const before = canon(o);
   db.renames = db.renames || {};
   delete db.renames[n]; // der neue Name ist (wieder) der aktuelle
   db.renames[o] = n;
+  // Notiz zieht mit um
+  if (db.notes && db.notes[before] && !db.notes[n]) { db.notes[n] = db.notes[before]; delete db.notes[before]; }
 }
 const sessionOrder = (a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.createdAt - b.createdAt);
 const doneSessions = () => db.sessions.filter(s => s.status === 'done').sort(sessionOrder);
 const isValidSet = s => s.w != null && s.r != null && s.r > 0 && !Number.isNaN(s.w);
-const validSets = ex => (!ex || ex.skipped) ? [] : ex.sets.filter(isValidSet);
+/** Arbeitssatz: vollständig eingetragen und kein Aufwärmsatz. Nur Arbeitssätze zählen für Vergleich, Rekorde und Prognose. */
+const isWorkSet = s => isValidSet(s) && !s.warm;
+const validSets = ex => (!ex || ex.skipped) ? [] : ex.sets.filter(isWorkSet);
 const bestE1 = sets => Math.max(...sets.map(e1rm));
 const bestSetByE1 = sets => sets.reduce((a, b) => e1rm(b) > e1rm(a) ? b : a);
 
@@ -374,7 +386,7 @@ function previousEntry(key, session) {
 function prefillWeights(session) {
   for (const ex of session.exercises) {
     const prev = previousEntry(ex.key, session);
-    const ws = prev ? prev.ex.sets.filter(isValidSet).map(x => x.w) : [];
+    const ws = prev ? prev.ex.sets.filter(isWorkSet).map(x => x.w) : [];
     ex.sets.forEach((set, j) => {
       if (set.w != null || set.r != null) return;
       const w = ws.length ? ws[Math.min(j, ws.length - 1)] : ex.guide;
@@ -509,8 +521,14 @@ function planProgress(plan) {
 }
 
 /* ---------------- Prognose ---------------- */
-const MAX_WEEKLY = 0.02;
-/** Lineare Regression über das geschätzte 1RM der letzten bis zu 8 Trainings (x = Datum). */
+const MAX_WEEKLY = 0.01;   // höchstens +1 % pro Woche zu Beginn …
+const TAU_WEEKS = 12;      // … und mit der Zeit abflachend (Zeitkonstante 12 Wochen)
+/** Wirksame Wochen bis „days“: wächst anfangs fast linear und flacht dann ab. */
+const effWeeks = days => TAU_WEEKS * (1 - Math.exp(-days / 7 / TAU_WEEKS));
+/**
+ * Prognose: lineare Regression über das geschätzte 1RM der letzten bis zu 8 Trainings (x = Datum).
+ * Die Steigung wird auf +1 % pro Woche gedeckelt und flacht über die Zeit ab; kein Anstieg = keine sinkende Prognose.
+ */
 function forecastFor(key, days, perDumbbell) {
   const h = exerciseHistory(key).slice(-8);
   if (h.length < 3) return { status: 'few', n: h.length, text: 'Für eine Prognose brauche ich mindestens 3 Trainings.' };
@@ -522,14 +540,14 @@ function forecastFor(key, days, perDumbbell) {
   const last = h[h.length - 1], ref = bestSetByE1(last.sets), e0 = e1rm(ref);
   const cap = e0 * MAX_WEEKLY / 7;
   const used = slope <= 0 ? 0 : Math.min(slope, cap);
-  const eF = e0 + used * days;
+  const eF = e0 + used * 7 * effWeeks(days);
   const step = perDumbbell ? 1 : 2.5;
   let w = ref.w;
   if (used > 0) w = Math.max(ref.w, Math.round((eF / (1 + ref.r / 30)) / step) * step);
   const status = used > 0 ? 'up' : 'flat';
   const weeklyPct = slope * 7 / e0 * 100;
-  return { status, n: h.length, slope, capped: slope > cap, weeklyPct, usedWeeklyPct: used * 7 / e0 * 100,
-    e0, eF, pct: (eF / e0 - 1) * 100, w, r: ref.r, today: ref, lastDate: last.session.date, points: pts };
+  return { status, n: h.length, slope, used, capped: slope > cap, weeklyPct, usedWeeklyPct: used * 7 / e0 * 100,
+    e0, eF, at: d => e0 + used * 7 * effWeeks(d), pct: (eF / e0 - 1) * 100, w, r: ref.r, today: ref, lastDate: last.session.date, points: pts };
 }
 function forecastText(name, f, days) {
   if (f.status === 'few') return f.text;
@@ -552,7 +570,70 @@ function planForecast(plan, days) {
       return a + (prog.cur[k] * factor / prog.ref[k] - 1) * 100;
     }, 0) / ks.length;
   }
-  return { per, pct, count: withF.length, prog, endY };
+  // Verlauf der Prognose (gleiche Abflachung für alle Übungen): Wert nach t Tagen
+  const y0 = prog.points.length ? prog.points[prog.points.length - 1].y : 0;
+  const at = t => endY == null ? null : y0 + (endY - y0) * (days ? effWeeks(t) / effWeeks(days) : 0);
+  return { per, pct, count: withF.length, prog, endY, at };
+}
+
+/* ---------------- Rekorde, Statistik, Kurztexte ---------------- */
+/**
+ * Persönliche Rekorde einer Übung in diesem Training gegenüber allen früheren Einträgen:
+ * höchstes Gewicht, meiste Wiederholungen bei einem schon bekannten Gewicht, sonst bestes geschätztes 1RM.
+ */
+function recordsFor(session, ex) {
+  const cur = validSets(ex);
+  if (!cur.length) return [];
+  const before = exerciseHistory(ex.key).filter(e => e.session.id !== session.id && sessionOrder(e.session, session) < 0);
+  if (!before.length) return [];
+  const old = before.flatMap(e => e.sets), out = [];
+  const maxW = Math.max(...cur.map(x => x.w)), oldMaxW = Math.max(...old.map(x => x.w));
+  if (maxW > oldMaxW) {
+    const r = Math.max(...cur.filter(x => x.w === maxW).map(x => x.r));
+    out.push({ type: 'weight', text: `Höchstes Gewicht: ${fmtNum(maxW)} kg × ${r} (vorher ${fmtNum(oldMaxW)} kg)` });
+  }
+  for (const w of [...new Set(cur.map(x => x.w))].sort((a, b) => b - a)) {
+    const oldAt = old.filter(x => x.w === w);
+    if (!oldAt.length) continue;
+    const r = Math.max(...cur.filter(x => x.w === w).map(x => x.r)), pr = Math.max(...oldAt.map(x => x.r));
+    if (r > pr) { out.push({ type: 'reps', text: `Meiste Wdh. bei ${fmtNum(w)} kg: ${r} (vorher ${pr})` }); break; }
+  }
+  const e = bestE1(cur), oe = Math.max(...old.map(e1rm));
+  if (!out.length && e > oe + 1e-9) out.push({ type: '1rm', text: `Bestes geschätztes Maximalgewicht: ${fmtNum(round1(e))} kg` });
+  return out;
+}
+/** Kennzahlen eines Trainings: Arbeitssätze, bewegtes Gewicht (Kurzhanteln × 2) und Dauer in Minuten. */
+function sessionStats(s, now = Date.now()) {
+  let sets = 0, volume = 0;
+  for (const ex of s.exercises) for (const x of validSets(ex)) { sets++; volume += x.w * x.r * (ex.perDumbbell ? 2 : 1); }
+  const end = s.finishedAt || now;
+  const minutes = s.startedAt && end >= s.startedAt && end - s.startedAt < 5 * 3600e3 ? (end - s.startedAt) / 60000 : null;
+  return { sets, volume: Math.round(volume), minutes };
+}
+/** Sehr kurze Beschreibung der Veränderung für kompakte Listen, z. B. „+2 Wdh. bei 45 kg“. */
+function shortDelta(a) {
+  if (a.status === 'skipped') return 'zuletzt übersprungen';
+  if (!a.prev) return a.cur ? (a.session && a.session.kind === 'baseline' ? 'Startwerte' : 'erstes Training') : 'noch keine Werte';
+  if (a.decisive < 0) return `gleich · ${fmtSet(a.pairs[0].cur)}`;
+  const p = a.pairs[a.decisive], dw = round2(p.cur.w - p.prev.w), dr = p.cur.r - p.prev.r;
+  const sg = x => (x > 0 ? '+' : '−') + fmtNum(Math.abs(x));
+  if (a.viaE1rm) return `1RM ${fmtPct(a.e1.pct)} · ${fmtSet(p.cur)}`;
+  if (dw === 0) return `${sg(dr)} Wdh. bei ${fmtNum(p.cur.w)} kg`;
+  if (dr === 0) return `${sg(dw)} kg bei ${p.cur.r} Wdh.`;
+  return `${sg(dw)} kg, ${sg(dr)} Wdh.`;
+}
+/** Abgeschlossene Trainings (ohne Startwerte) in der Kalenderwoche (Mo–So) des Datums. */
+function weekCount(refISO = todayISO()) {
+  const [y, m, d] = refISO.split('-').map(Number);
+  const mon = addDaysISO(refISO, -((new Date(y, m - 1, d).getDay() + 6) % 7)), sun = addDaysISO(mon, 6);
+  return db.sessions.filter(s => s.status === 'done' && s.kind !== 'baseline' && s.date >= mon && s.date <= sun).length;
+}
+/** Notiz je Übung (z. B. Maschineneinstellung) – hängt am Namen, folgt Umbenennungen. */
+const noteFor = key => ((db && db.notes) || {})[canon(key)] || '';
+function setNote(key, text) {
+  db.notes = db.notes || {};
+  const t = String(text || '').trim();
+  if (t) db.notes[canon(key)] = t; else delete db.notes[canon(key)];
 }
 
 /* ---------------- Supersätze ---------------- */
@@ -647,7 +728,8 @@ const api = {
   START_PLAN_ID, START_VALUES, DATA_VERSION, defaultRest, restOf, restAfter, unifyGroupRest, mkPlanEx, defaultPlan, snapshotEx, newSession, baselineSession, freshDb, validDb, migrate,
   setDb, getDb, canon, sameEx, renameExercise, sessionOrder, doneSessions, isValidSet, validSets, bestE1, bestSetByE1, exerciseHistory, previousEntry,
   rankSets, cmpPair, compareSets, diffText, explain, trendFor, analyzeExercise, latestProgress, planProgress,
-  forecastFor, forecastText, planForecast, blocks, normalizeGroups, MAX_WEEKLY, MUSCLES, musclesOf, planMuscleLoad, muscleLevel, prefillWeights, isUntouched,
+  forecastFor, forecastText, planForecast, blocks, normalizeGroups, MAX_WEEKLY, TAU_WEEKS, effWeeks, isWorkSet,
+  recordsFor, sessionStats, shortDelta, weekCount, noteFor, setNote, MUSCLES, musclesOf, planMuscleLoad, muscleLevel, prefillWeights, isUntouched,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.Logic = api;

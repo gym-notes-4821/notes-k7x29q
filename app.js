@@ -53,6 +53,9 @@ const ICON_PATHS = {
   down: '<path d="M6 9l6 6 6-6"/>',
   sound: '<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M15.5 9a4 4 0 0 1 0 6M18 6.5a7.5 7.5 0 0 1 0 11"/>',
   mute: '<path d="M4 9.5v5h3.5L12 18.5v-13L7.5 9.5z"/><path d="M16 9.5l5 5M21 9.5l-5 5"/>',
+  note: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
+  trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4"/><path d="M12 13v4M8.5 20h7"/>',
+  plus: '<path d="M12 5v14M5 12h14"/>',
   timer: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2M10 3h4"/>',
   link: '<path d="M10 14a4.5 4.5 0 0 0 6.4.4l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.4 1.4"/><path d="M14 10a4.5 4.5 0 0 0-6.4-.4l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.4-1.4"/>',
   // Ampel-Symbole (gefüllt), damit die Bewertung auch ohne Farbe lesbar bleibt
@@ -154,11 +157,26 @@ const STATUS = {
   ffew: { label: 'Zu wenig Daten', icon: 'stNone' },
 };
 const CLS = { up: 'up', same: 'same', down: 'down', none: 'grey', skipped: 'grey', fup: 'up', fflat: 'same', ffew: 'grey' };
-function statusRow({ st, name, text, meta, href, perDumbbell }) {
+function statusRow({ st, name, text, meta, href, perDumbbell, prs = [] }) {
   return `<a class="prow s-${CLS[st]}" href="${href}">
     <div class="prow-top"><span class="pname">${esc(name)}${perDumbbell ? ' <span class="pd">pro Hantel</span>' : ''}</span>
     <span class="st">${icon(STATUS[st].icon)}${STATUS[st].label}</span></div>
+    ${prs.map(r => `<div class="pr-line">${icon('trophy')}${esc(r.text)}</div>`).join('')}
     <div class="ptext">${esc(text)}</div>${meta ? `<div class="pmeta">${meta}</div>` : ''}</a>`;
+}
+/** Kompakte Zeile: Name, kurze Kennzahl, Mini-Kurve und Ampel-Symbol. Details gibt es beim Antippen. */
+function compactRow({ st, name, delta, spark, href }) {
+  return `<a class="prow compact s-${CLS[st]}" href="${href}" aria-label="${esc(name)}: ${STATUS[st].label}, ${esc(delta)}">
+    <div class="c-main"><span class="pname">${esc(name)}</span><span class="c-delta">${esc(delta)}</span></div>
+    ${spark}<span class="c-st" title="${STATUS[st].label}">${icon(STATUS[st].icon)}</span><span class="c-go">›</span></a>`;
+}
+/** Mini-Kurve (geschätztes 1RM der letzten Trainings). */
+function sparkline(values) {
+  if (values.length < 2) return '<span class="spark spark-empty"></span>';
+  const W = 72, H = 28, lo = Math.min(...values), hi = Math.max(...values), span = hi - lo || 1;
+  const pts = values.map((v, i) => [2 + i * (W - 4) / (values.length - 1), H - 3 - (v - lo) * (H - 6) / span]);
+  const last = pts[pts.length - 1];
+  return `<svg class="spark" viewBox="0 0 ${W} ${H}" aria-hidden="true"><polyline points="${pts.map(p => p.join(',')).join(' ')}"/><circle cx="${last[0]}" cy="${last[1]}" r="2.6"/></svg>`;
 }
 /** Liste mit Zwischenüberschriften für Supersätze. rowFn(ex) liefert HTML einer Zeile. */
 function groupedList(exs, rowFn) {
@@ -176,11 +194,12 @@ function niceStep(range) {
  * points: [{d, y}] durchgezogen; forecast: {d, y} gestrichelt ab dem letzten Punkt.
  * timeScale: x nach Datum, sonst gleichmäßig nach Reihenfolge.
  */
-function lineChart({ points, forecast = null, unit = '', timeScale = false, zero = false }) {
+function lineChart({ points, forecast = null, curve = null, unit = '', timeScale = false, zero = false }) {
   if (!points.length) return '<p class="empty small">Noch keine Daten für die Grafik.</p>';
   if (timeScale) { const m = new Map(); points.forEach(p => m.set(p.d, p)); points = [...m.values()]; }
+  if (curve && curve.length) forecast = curve[curve.length - 1];
   const W = 340, H = 200, Lp = 42, R = 16, T = 22, B = 28;
-  const ys = points.map(p => p.y).concat(forecast ? [forecast.y] : []).concat(zero ? [0] : []);
+  const ys = points.map(p => p.y).concat(forecast ? [forecast.y] : []).concat(curve ? curve.map(c => c.y) : []).concat(zero ? [0] : []);
   let lo = Math.min(...ys), hi = Math.max(...ys);
   if (hi - lo < 1e-9) { lo -= 1; hi += 1; }
   const step = niceStep(hi - lo);
@@ -204,18 +223,23 @@ function lineChart({ points, forecast = null, unit = '', timeScale = false, zero
     return keep;
   };
   const dateIdx = pick(44), valIdx = pick(34);
+  const tipOf = (d, y) => `${fmtDate(d, 'tiny')}: ${fy(y)}${unit === 'kg' ? ' kg' : unit === '%' ? '' : ' Wdh.'}`;
+  const hits = points.map((p, i) => `<circle cx="${xs[i]}" cy="${Y(p.y)}" r="15" class="hit" data-tip="${esc(tipOf(p.d, p.y))}"/>`).join('');
   const dots = points.map((p, i) => `<circle cx="${xs[i]}" cy="${Y(p.y)}" r="4.5" class="dot"/>
     ${valIdx.has(i) ? `<text x="${xs[i]}" y="${Y(p.y) - 9}" class="val" text-anchor="middle">${fy(p.y)}</text>` : ''}
     ${dateIdx.has(i) && endX - xs[i] >= 44 || (!forecast && dateIdx.has(i)) ? `<text x="${xs[i]}" y="${H - 8}" class="axis" text-anchor="middle">${fmtDate(p.d, 'tiny')}</text>` : ''}`).join('');
   let fc = '';
   if (forecast) {
     const lx = X(xsRaw[xsRaw.length - 1]), ly = Y(points[points.length - 1].y);
-    fc = `<line x1="${lx}" y1="${ly}" x2="${X(xEnd)}" y2="${Y(forecast.y)}" class="fline"/>
+    const cpts = curve && curve.length ? [`${lx},${ly}`].concat(curve.map(c => `${X(dayNum(c.d))},${Y(c.y)}`)).join(' ') : `${lx},${ly} ${X(xEnd)},${Y(forecast.y)}`;
+    fc = `<polyline points="${cpts}" class="fline"/>
+      <circle cx="${X(xEnd)}" cy="${Y(forecast.y)}" r="15" class="hit" data-tip="${esc('Prognose ' + tipOf(forecast.d, forecast.y))}"/>
       <circle cx="${X(xEnd)}" cy="${Y(forecast.y)}" r="4.5" class="fdot"/>
       <text x="${X(xEnd)}" y="${Y(forecast.y) - 9}" class="val" text-anchor="end">${fy(forecast.y)}</text>
       <text x="${X(xEnd)}" y="${H - 8}" class="axis" text-anchor="end">${fmtDate(forecast.d, 'tiny')}</text>`;
   }
-  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Verlaufsgrafik">${g}<polyline points="${line}" class="pline"/>${fc}${dots}</svg>`;
+  return `<svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Verlaufsgrafik">${g}<polyline points="${line}" class="pline"/>${fc}${dots}${hits}</svg>
+    <div class="chart-tip" aria-live="polite">Punkt antippen für Details</div>`;
 }
 
 /* ---------------- Pausen-Timer ----------------
@@ -268,7 +292,7 @@ const Rest = (() => {
     const s = currentSession(); if (s && s.rest) { delete s.rest; save(); }
     hide(); keepAwake(false);
   }
-  function hide() { el.hidden = true; document.body.classList.remove('has-rest'); clearInterval(tick); tick = null; }
+  function hide() { el.hidden = true; document.body.classList.remove('has-rest'); document.documentElement.classList.remove('has-rest'); clearInterval(tick); tick = null; }
   function draw() {
     const s = sess(); if (!s || !s.rest) return hide();
     const r = s.rest, sec = left(r);
@@ -285,7 +309,7 @@ const Rest = (() => {
     const s = sess();
     if (!s || !s.rest || left(s.rest) <= -8) { if (s && s.rest) { delete s.rest; save(); } return hide(); }
     if (left(s.rest) <= 0) doneShown = true; // abgelaufen, während die App zu war: nicht nachträglich piepen
-    el.hidden = false; document.body.classList.add('has-rest');
+    el.hidden = false; document.body.classList.add('has-rest'); document.documentElement.classList.add('has-rest');
     draw();
     if (!tick) tick = setInterval(draw, 250);
   }
@@ -354,12 +378,19 @@ function viewHome() {
   return `<div class="home">
     <header class="brand" aria-label="Gym Notes">${DACKEL}<span class="wordmark">GYM <b>NOTES</b></span></header>
     <p class="active-plan">Aktiver Plan: <b>${plan ? esc(plan.name) : 'keiner'}</b></p>
+    ${weekLine()}
     <div class="tiles">
       <a class="tile" href="#/plaene"><span class="ic">${icon('plans')}</span><span class="tl">Trainingspläne</span></a>
       <a class="tile tile-main" href="#/training"><span class="ic">${icon('dumbbell')}</span><span class="tl">Training</span>${run ? '<span class="hint">Weitermachen</span>' : ''}</a>
       <a class="tile" href="#/fortschritt"><span class="ic">${icon('progress')}</span><span class="tl">Fortschritt</span></a>
       <a class="tile" href="#/ausblick"><span class="ic">${icon('outlook')}</span><span class="tl">Ausblick</span></a>
     </div></div>`;
+}
+
+function weekLine() {
+  const goal = db.settings?.weeklyGoal || 3, n = L.weekCount();
+  const dots = Array.from({ length: Math.max(goal, n) }, (_, k) => `<span class="wdot ${k < n ? 'on' : ''}"></span>`).join('');
+  return `<p class="week" aria-label="Diese Woche ${n} von ${goal} Trainings">Diese Woche <span class="wdots">${dots}</span> <b>${n} von ${goal}</b>${n >= goal ? ' · Ziel erreicht 🎉' : ''}</p>`;
 }
 
 /* ---------------- Training ---------------- */
@@ -380,20 +411,38 @@ function lastLine(s, ex) {
   if (ex.guide != null) return `<p class="last">Noch kein Eintrag · Orientierung <b>${fmtNum(ex.guide)} kg</b></p>`;
   return '<p class="last">Noch kein Eintrag</p>';
 }
+let editingNote = null;
+function noteBlock(key) {
+  const n = L.noteFor(key);
+  if (editingNote === key) return `<input class="note-input" data-note="${esc(key)}" value="${esc(n)}" placeholder="z. B. Sitzhöhe 4, Griff eng" aria-label="Notiz">`;
+  return n ? `<button class="note-line" data-act="note" data-key="${esc(key)}">${icon('note')}${esc(n)}</button>` : '';
+}
+const noteBtn = key => `<button class="icon-btn" data-act="note" data-key="${esc(key)}" aria-label="Notiz bearbeiten">${icon('note')}</button>`;
 function inputs(i, j, set) {
   return `<input type="text" inputmode="decimal" autocomplete="off" enterkeyhint="next" data-f="w" data-ex="${i}" data-set="${j}" value="${fmtNum(set.w)}" placeholder="kg" aria-label="Satz ${j + 1} Gewicht in kg">
     <span class="x">×</span>
     <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" enterkeyhint="next" data-f="r" data-ex="${i}" data-set="${j}" value="${set.r ?? ''}" placeholder="Wdh." aria-label="Satz ${j + 1} Wiederholungen">`;
 }
+function prevCellFor(i, j, p) {
+  return p && isValidSet(p)
+    ? `<button class="prev-btn" data-act="take" data-ex="${i}" data-set="${j}" data-w="${p.w}" data-r="${p.r}" aria-label="Wert vom letzten Mal übernehmen">${fmtNum(p.w)} × ${p.r}<small>zuletzt</small></button>`
+    : '<span class="prev-empty">–</span>';
+}
 function singleCard(s, ex, i) {
-  const head = `<div class="ex-head"><h3>${esc(ex.name)}</h3>${ex.perDumbbell ? '<span class="pd">pro Hantel</span>' : ''}<span class="rest-tag">${icon('timer')}${fmtRest(L.restOf(ex))}</span></div>`;
+  const head = `<div class="ex-head"><h3>${esc(ex.name)}</h3>${ex.perDumbbell ? '<span class="pd">pro Hantel</span>' : ''}<span class="rest-tag">${icon('timer')}${fmtRest(L.restOf(ex))}</span>${noteBtn(ex.key)}</div>${noteBlock(ex.key)}`;
   if (ex.skipped) return `<section class="ex-card skipped">${head}<p class="last">Übersprungen – zählt nicht als schwächer.</p>
     <div class="ex-actions"><button data-act="unskip" data-ex="${i}">Doch trainieren</button></div></section>`;
-  const hasPrev = !!previousEntry(ex.key, s);
+  const prev = previousEntry(ex.key, s), prevSets = prev ? prev.ex.sets.filter(L.isWorkSet) : [];
+  let w = 0;
+  const rows = ex.sets.map((set, j) => {
+    if (set.warm) return `<div class="set-row single warm ${isValidSet(set) ? 'complete' : ''}"><button class="no warm-no" data-act="del-warm" data-ex="${i}" data-set="${j}" aria-label="Aufwärmsatz entfernen">A</button>${inputs(i, j, set)}<span class="prev-empty small">Aufwärmen</span></div>`;
+    const p = prevSets[w++];
+    return `<div class="set-row single ${isValidSet(set) ? 'complete' : ''}"><span class="no">${w}</span>${inputs(i, j, set)}${prevCellFor(i, j, p)}</div>`;
+  }).join('');
   return `<section class="ex-card" data-card="${i}">${head}${lastLine(s, ex)}
-    <div class="sets"><div class="set-head"><span></span><span>kg${ex.perDumbbell ? ' / Hantel' : ''}</span><span></span><span>Wdh.</span></div>
-    ${ex.sets.map((set, j) => `<div class="set-row ${isValidSet(set) ? 'complete' : ''}"><span class="no">${j + 1}</span>${inputs(i, j, set)}</div>`).join('')}</div>
-    <div class="ex-actions"><button class="btn-take" data-act="take-all" data-ex="${i}" ${hasPrev ? '' : 'disabled'}>Wie letztes Mal</button>
+    <div class="sets"><div class="set-head single"><span></span><span>kg${ex.perDumbbell ? ' / Hantel' : ''}</span><span></span><span>Wdh.</span><span>Zuletzt</span></div>${rows}</div>
+    <button class="add-warm" data-act="add-warm" data-ex="${i}">${icon('plus')}Aufwärmsatz</button>
+    <div class="ex-actions"><button class="btn-take" data-act="take-all" data-ex="${i}" ${prev ? '' : 'disabled'}>Wie letztes Mal</button>
     <button data-act="skip" data-ex="${i}">Überspringen</button></div></section>`;
 }
 function supersetCard(s, b) {
@@ -401,18 +450,16 @@ function supersetCard(s, b) {
   const rounds = Math.max(...items.map(it => it.ex.sets.length));
   const prevs = items.map(it => previousEntry(it.ex.key, s));
   let h = `<section class="ex-card superset"><div class="ss-head"><h3>Supersatz ${esc(b.group)}</h3><span class="muted small">${rounds} Runden · ohne Pause dazwischen</span><span class="rest-tag">${icon('timer')}${fmtRest(Math.max(...items.map(it => L.restOf(it.ex))))} nach jeder Runde</span></div>
-    <ol class="ss-list">${items.map((it, k) => `<li class="${it.ex.skipped ? 'skipped' : ''}"><div class="ss-li-top"><b>${esc(it.ex.name)}</b>${it.ex.perDumbbell ? '<span class="pd">pro Hantel</span>' : ''}
+    <ol class="ss-list">${items.map((it, k) => `<li class="${it.ex.skipped ? 'skipped' : ''}"><div class="ss-li-top"><b>${esc(it.ex.name)}</b>${it.ex.perDumbbell ? '<span class="pd">pro Hantel</span>' : ''}${noteBtn(it.ex.key)}
       ${it.ex.skipped ? `<button class="btn-small" data-act="unskip" data-ex="${it.idx}">Doch trainieren</button>` : `<button class="btn-small" data-act="skip" data-ex="${it.idx}">Überspringen</button>`}</div>
-      ${it.ex.skipped ? '<p class="last">Übersprungen – zählt nicht als schwächer.</p>' : lastLine(s, it.ex)}</li>`).join('')}</ol>`;
+      ${noteBlock(it.ex.key)}${it.ex.skipped ? '<p class="last">Übersprungen – zählt nicht als schwächer.</p>' : lastLine(s, it.ex)}</li>`).join('')}</ol>`;
   for (let r = 0; r < rounds; r++) {
     h += `<div class="round"><div class="round-title">Runde ${r + 1}</div>`;
     items.forEach((it, k) => {
       const ex = it.ex, set = ex.sets[r];
       if (ex.skipped || !set) return;
       const p = prevs[k] && prevs[k].ex.sets[r];
-      const prevCell = p && isValidSet(p)
-        ? `<button class="prev-btn" data-act="take" data-ex="${it.idx}" data-set="${r}" data-w="${p.w}" data-r="${p.r}" aria-label="Wert vom letzten Mal übernehmen">${fmtNum(p.w)} × ${p.r}<small>zuletzt</small></button>`
-        : '<span class="prev-empty">–</span>';
+      const prevCell = prevCellFor(it.idx, r, p);
       h += `<div class="ss-row"><div class="ss-name">${esc(ex.name)}</div>
         <div class="set-row ss ${isValidSet(set) ? 'complete' : ''}">${inputs(it.idx, r, set)}${prevCell}</div></div>`;
     });
@@ -430,7 +477,8 @@ function viewWorkout(id) {
   h += `<div class="wk-info"><div class="row"><div class="spacer"><b>${esc(s.planName)}</b>
     <div class="muted small">${done} von ${s.exercises.length} Übungen erledigt</div></div>
     <label class="date-lbl"><span class="muted small">Datum</span><input type="date" data-act="date" value="${s.date}" max="${todayISO()}" aria-label="Datum"></label></div>
-    <div class="progress"><div style="width:${Math.round(done / Math.max(1, s.exercises.length) * 100)}%"></div></div></div>`;
+    <div class="progress"><div style="width:${Math.round(done / Math.max(1, s.exercises.length) * 100)}%"></div></div>
+    ${s.status === 'active' ? `<div class="wk-stats" id="wk-stats">${liveStats(s)}</div>` : ''}</div>`;
   for (const b of blocks(s.exercises)) h += b.group ? supersetCard(s, b) : singleCard(s, b.items[0].ex, b.items[0].idx);
   h += '<div class="wk-footer stack">';
   if (s.status === 'active') h += `<button class="btn-primary btn-block btn-big" data-act="finish">Training abschließen</button>
@@ -439,6 +487,15 @@ function viewWorkout(id) {
       <button class="btn-danger btn-block" data-act="delete-session">Training löschen</button>`;
   return h + '</div>';
 }
+
+const fmtDur = min => min == null ? '–' : min >= 60 ? `${Math.floor(min / 60)}:${String(Math.floor(min % 60)).padStart(2, '0')} h` : `${Math.floor(min)}:${String(Math.floor((min * 60) % 60)).padStart(2, '0')}`;
+const fmtVol = v => `${v.toLocaleString('de-DE')} kg`;
+function liveStats(s) {
+  const st = L.sessionStats(s);
+  return `<span>${icon('timer')}<b>${s.startedAt ? fmtDur(st.minutes) : 'startet mit dem 1. Satz'}</b></span><span><b>${st.sets}</b> ${st.sets === 1 ? 'Satz' : 'Sätze'}</span><span><b>${fmtVol(st.volume)}</b> bewegt</span>`;
+}
+// Live-Werte im laufenden Training jede Sekunde aktualisieren
+setInterval(() => { const el = document.getElementById('wk-stats'), s = currentSession(); if (el && s && s.status === 'active') el.innerHTML = liveStats(s); }, 1000);
 
 /* ---------------- Auswertung eines Trainings ---------------- */
 function counts(list) {
@@ -456,11 +513,22 @@ function viewResult(id) {
   const s = getSession(id);
   if (!s) return topbar('Auswertung') + '<p class="empty">Training nicht gefunden.</p>';
   const res = s.exercises.map(ex => analyzeExercise(s, ex));
+  const prs = s.exercises.map(ex => L.recordsFor(s, ex));
+  const prCount = prs.reduce((a, r) => a + (r.length ? 1 : 0), 0);
+  const st = L.sessionStats(s);
   let h = topbar(s.kind === 'baseline' ? 'Startwerte' : 'Auswertung', '#/') +
-    `<p class="muted">${fmtDate(s.date, 'long')} · ${sessionLabel(s)}</p>${counts(res.map(a => a.status))}`;
+    `<p class="muted">${fmtDate(s.date, 'long')} · ${sessionLabel(s)}</p>`;
+  if (s.kind !== 'baseline') h += `<div class="summary"><div><b>${fmtDur(st.minutes)}</b><span>Dauer</span></div><div><b>${st.sets}</b><span>${st.sets === 1 ? 'Satz' : 'Sätze'}</span></div>
+    <div><b>${st.volume.toLocaleString('de-DE')}</b><span>kg bewegt</span></div><div class="${prCount ? 'has-pr' : ''}"><b>${icon('trophy')}${prCount}</b><span>Rekorde</span></div></div>`;
+  if (prCount) {
+    const items = s.exercises.map((ex, i) => prs[i].length ? `<div class="pr-item"><b>${esc(ex.name)}</b><span>${prs[i].map(r => esc(r.text)).join(' · ')}</span></div>` : '').filter(Boolean);
+    h += `<div class="pr-box"><div class="pr-head">${icon('trophy')}${prCount === 1 ? 'Neuer Rekord' : `${prCount} neue Rekorde`}</div>${items.slice(0, 4).join('')}
+      ${items.length > 4 ? `<details class="pr-more"><summary>${items.length - 4} weitere Rekorde anzeigen</summary>${items.slice(4).join('')}</details>` : ''}</div>`;
+  }
+  h += counts(res.map(a => a.status));
   if (s.status === 'active') h += `<p class="card small">Dieses Training läuft noch. <a href="#/training/${s.id}">Weiter eintragen</a></p>`;
   h += groupedList(s.exercises, (ex, i) => statusRow({ st: res[i].status, name: ex.name, text: res[i].text, meta: metaFor(res[i]),
-    href: `#/fortschritt/uebung/${encodeURIComponent(ex.key)}`, perDumbbell: ex.perDumbbell }));
+    href: `#/fortschritt/uebung/${encodeURIComponent(ex.key)}`, perDumbbell: ex.perDumbbell, prs: prs[i] }));
   h += `<div class="stack" style="margin-top:16px"><a class="btn btn-ghost btn-block" href="#/training/${s.id}">Training korrigieren</a>
     <a class="btn btn-primary btn-block btn-big" href="#/">Fertig</a></div>`;
   return h;
@@ -495,9 +563,11 @@ function viewProgress() {
     <div class="chart-wrap"><div class="chart-title"><span>Kraft gegenüber Startwerten</span>${last ? `<b class="${last.y > 0.05 ? 'c-up' : last.y < -0.05 ? 'c-down' : ''}">${fmtPct(last.y)}</b>` : ''}</div>
     ${lineChart({ points: prog.points, unit: '%', zero: true })}
     <p class="chart-note">Durchschnitt aller Übungen, geschätztes Maximalgewicht (1RM) des besten Satzes.</p></div>`;
+  h += '<p class="muted small list-hint">Letztes Training gegenüber dem vorherigen · antippen für Details</p>';
   h += groupedList(plan.exercises, ex => {
     const key = normKey(ex.name), a = latestProgress(key);
-    return statusRow({ st: a.status, name: ex.name, text: a.text, meta: metaFor(a), href: `#/fortschritt/uebung/${encodeURIComponent(key)}`, perDumbbell: ex.perDumbbell });
+    const spark = sparkline(exerciseHistory(key).slice(-8).map(e => bestE1(e.sets)));
+    return compactRow({ st: a.status, name: ex.name, delta: L.shortDelta(a), spark, href: `#/fortschritt/uebung/${encodeURIComponent(key)}` });
   });
   const others = otherExercises(plan);
   if (others.length) h += `<h2>Weitere Übungen (nicht im Plan)</h2>${others.map(([k, n]) => `<a class="card link row" href="#/fortschritt/uebung/${encodeURIComponent(k)}"><span class="spacer">${esc(n)}</span><span class="muted">›</span></a>`).join('')}`;
@@ -512,7 +582,9 @@ const PERIODS = [[30, '1 Monat'], [91, '3 Monate'], [182, '6 Monate']];
 function periodSeg() {
   return `<div class="seg seg3">${PERIODS.map(([d, l]) => `<button class="${d === outlookDays ? 'on' : ''}" data-act="period" data-d="${d}">${l}</button>`).join('')}</div>`;
 }
-const outlookNote = '<p class="note">Grobe Schätzung bei gleichbleibendem Tempo. Fortschritt verlangsamt sich mit der Zeit meist.</p>';
+const outlookNote = '<p class="note">Grobe Schätzung: Die App rechnet mit höchstens +1 % pro Woche und lässt das Tempo mit der Zeit abflachen – so wie Fortschritt meist verläuft.</p>';
+/** Stützstellen für die Prognosekurve (ca. alle 2 Wochen bis zum Ende des Zeitraums). */
+const curveDays = days => { const n = Math.max(2, Math.round(days / 14)); return Array.from({ length: n }, (_, k) => Math.round(days * (k + 1) / n)); };
 function viewOutlook() {
   const plan = activePlan();
   let h = topbar('Ausblick');
@@ -523,13 +595,13 @@ function viewOutlook() {
   h += `<p class="muted small">Plan: <b>${esc(plan.name)}</b></p>${periodSeg()}${outlookNote}
     <div class="chart-wrap"><div class="chart-title"><span>Gesamtprognose</span><b class="${pf.pct > 0.05 ? 'c-up' : ''}">${pf.pct == null ? '–' : fmtPct(pf.pct)}</b></div>
     <p class="chart-note" style="margin-top:0">${pf.pct == null ? 'Für eine Prognose brauche ich mindestens 3 Trainings.' : `Durchschnitt aus ${pf.count} Übungen in ${PERIODS.find(p => p[0] === outlookDays)[1]} gegenüber heute.`}</p>
-    ${lineChart({ points: pts, forecast: pf.pct == null || pf.endY == null ? null : { d: addDaysISO(lastD, outlookDays), y: pf.endY }, unit: '%', timeScale: true, zero: true })}
+    ${lineChart({ points: pts, curve: pf.pct == null || pf.endY == null ? null : curveDays(outlookDays).map(t => ({ d: addDaysISO(lastD, t), y: pf.at(t) })), unit: '%', timeScale: true, zero: true })}
     <p class="chart-note">Kraft gegenüber Startwerten · durchgezogen: bisher · gestrichelt: Prognose</p></div>`;
   h += groupedList(plan.exercises, ex => {
     const x = pf.per.find(p => p.e === ex), f = x.f;
     const st = f.status === 'few' ? 'ffew' : f.status === 'flat' ? 'fflat' : 'fup';
     let meta = '';
-    if (f.status !== 'few') meta = esc(`Trend ${fmtPct(f.weeklyPct)} pro Woche${f.capped ? ` – gedeckelt auf ${fmtPct(L.MAX_WEEKLY * 100)}` : ''} · Basis: ${f.n} Trainings`);
+    if (f.status !== 'few') meta = esc(`Trend ${fmtPct(f.weeklyPct)} pro Woche${f.capped ? ` – gedeckelt auf ${fmtPct(L.MAX_WEEKLY * 100)}, abflachend` : ''} · Basis: ${f.n} Trainings`);
     const text = f.status === 'few' ? f.text : forecastText(ex.name, f, outlookDays).replace(`${ex.name}: `, '');
     return statusRow({ st, name: ex.name, text, meta, href: `#/ausblick/uebung/${encodeURIComponent(x.key)}`, perDumbbell: ex.perDumbbell });
   });
@@ -547,16 +619,22 @@ function viewExercise(key, outlook) {
   const perDumbbell = planEx ? planEx.perDumbbell : (all.length && all[all.length - 1].ex.perDumbbell);
   let h = topbar(name, back, true);
   if (perDumbbell) h += '<p class="muted small">Gewichte pro Hantel</p>';
+  h += `<div class="detail-note">${noteBlock(key) || `<button class="note-line empty-note" data-act="note" data-key="${esc(key)}">${icon('note')}Notiz hinzufügen (z. B. Sitzhöhe)</button>`}</div>`;
   if (!hist.length) return h + '<p class="empty">Noch keine Einträge für diese Übung.</p>';
+  if (!outlook) {
+    const a = latestProgress(key);
+    h += statusRow({ st: a.status, name: 'Letztes Training', text: a.text, meta: metaFor(a), href: a.session ? `#/ergebnis/${a.session.id}` : '#/fortschritt',
+      prs: a.session ? L.recordsFor(a.session, a.session.exercises.find(e => L.sameEx(e.key, key))) : [] });
+  }
   if (outlook) {
     const f = forecastFor(key, outlookDays, perDumbbell);
     h += periodSeg() + outlookNote;
     const pts = hist.map(e => ({ d: e.session.date, y: bestE1(e.sets) }));
     h += `<div class="chart-wrap"><div class="chart-title"><span>Geschätztes Maximalgewicht (kg)</span></div>
-      ${lineChart({ points: pts, timeScale: true, unit: 'kg', forecast: f.status === 'few' ? null : { d: addDaysISO(f.lastDate, outlookDays), y: f.eF } })}
+      ${lineChart({ points: pts, timeScale: true, unit: 'kg', curve: f.status === 'few' ? null : curveDays(outlookDays).map(t => ({ d: addDaysISO(f.lastDate, t), y: f.at(t) })) })}
       <p class="chart-note">durchgezogen: bisher · gestrichelt: Prognose</p></div>
       <div class="card"><b>${esc(forecastText(name, f, outlookDays))}</b>
-      ${f.status !== 'few' ? `<p class="muted small">Trend der letzten ${f.n} Trainings: ${fmtPct(f.weeklyPct)} pro Woche${f.capped ? `, gedeckelt auf ${fmtPct(L.MAX_WEEKLY * 100)}` : ''}${f.status === 'flat' ? ' – aktuell kein Anstieg, daher keine sinkende Prognose' : ''}. Gerundet auf ${perDumbbell ? '1 kg' : '2,5 kg'}.</p>` : ''}</div>`;
+      ${f.status !== 'few' ? `<p class="muted small">Trend der letzten ${f.n} Trainings: ${fmtPct(f.weeklyPct)} pro Woche${f.capped ? `, gedeckelt auf ${fmtPct(L.MAX_WEEKLY * 100)} und mit der Zeit abflachend` : ''}${f.status === 'flat' ? ' – aktuell kein Anstieg, daher keine sinkende Prognose' : ''}. Gerundet auf ${perDumbbell ? '1 kg' : '2,5 kg'}.</p>` : ''}</div>`;
   } else {
     const weights = [...new Set(hist.flatMap(e => e.sets.map(s => s.w)))].sort((a, b) => a - b);
     let mode = chartMode[key] ?? '1rm';
@@ -592,7 +670,11 @@ function viewPlans() {
       <span class="radio">${on ? '✓' : ''}</span><span class="spacer"><b>${esc(p.name)}</b><span class="muted small">${p.exercises.length} Übungen${on ? ' · aktiv' : ''}</span></span></button>
       <a class="btn btn-ghost btn-small" href="#/plan/${p.id}">Bearbeiten</a>${p.exercises.length ? bodyMap(p) : ''}</div>`;
   }
+  const goal = db.settings?.weeklyGoal || 3;
   h += `<button class="btn-ghost btn-block" data-act="new-plan">+ Neuer Plan</button>
+    <h2>Wochenziel</h2><div class="card goal-card"><span class="spacer">Trainings pro Woche</span>
+    <button class="btn-icon" data-act="goal" data-d="-1" ${goal <= 1 ? 'disabled' : ''} aria-label="weniger">−</button><b class="goal-n">${goal}</b>
+    <button class="btn-icon" data-act="goal" data-d="1" ${goal >= 7 ? 'disabled' : ''} aria-label="mehr">+</button></div>
     <h2>Sicherung</h2><div class="card stack">
     <p class="small muted">Deine Daten liegen nur auf diesem Gerät. Exportiere regelmäßig eine Sicherung (z. B. in „Dateien“ oder iCloud).
     Letzte Sicherung: <b>${db.lastExport ? new Date(db.lastExport).toLocaleDateString('de-DE') : 'noch nie'}</b></p>
@@ -646,6 +728,7 @@ function viewSlotEdit(pid, eid) {
     <label class="field" style="margin-top:8px"><span>Supersatz</span><select data-slot="group">
       <option value="">Kein Supersatz (Einzelübung)</option>
       ${groups.map(g => `<option value="${esc(g)}" ${e.group === g ? 'selected' : ''}>Supersatz ${esc(g)}</option>`).join('')}</select></label>
+    <label class="field"><span>Notiz (erscheint im Training, z. B. Sitzhöhe oder Griff)</span><input data-slot-note="${esc(normKey(e.name))}" value="${esc(L.noteFor(normKey(e.name)))}" placeholder="optional"></label>
     <p class="muted small">Beim Umbenennen fragt die App, ob der bisherige Verlauf unter dem neuen Namen weiterläuft.</p>
     <div class="stack"><a class="btn btn-primary btn-block" href="#/plan/${p.id}">Fertig</a>
     <button class="btn-danger btn-block" data-act="del-ex">Übung aus Plan entfernen</button></div>`;
@@ -671,11 +754,11 @@ function focusNext(el) {
 function fillFromPrev(s, i) {
   const ex = s.exercises[i], prev = previousEntry(ex.key, s);
   if (!prev || ex.skipped) return;
-  prev.ex.sets.forEach((p, j) => {
-    if (!isValidSet(p)) return;
-    if (!ex.sets[j]) ex.sets[j] = { w: null, r: null };
-    ex.sets[j].w = p.w; ex.sets[j].r = p.r;
-  });
+  const work = prev.ex.sets.filter(L.isWorkSet);
+  let w = 0;
+  ex.sets.forEach(x => { if (!x.warm && work[w]) { x.w = work[w].w; x.r = work[w].r; w++; } });
+  for (; w < work.length; w++) ex.sets.push({ w: work[w].w, r: work[w].r });
+  if (!s.startedAt && s.status === 'active') s.startedAt = Date.now();
 }
 
 $app.addEventListener('input', ev => {
@@ -687,12 +770,16 @@ $app.addEventListener('input', ev => {
     const wasValid = isValidSet(set);
     t.classList.toggle('invalid', Number.isNaN(v));
     set[t.dataset.f] = Number.isNaN(v) ? null : v;
+    if (!wasValid && isValidSet(set) && !s.startedAt && s.status === 'active') s.startedAt = Date.now();
     save(); markRow(i, j);
+    { const st = document.getElementById('wk-stats'); if (st) st.innerHTML = liveStats(s); }
     if (!wasValid) Rest.afterSet(s, i, j, t);
     // Kurzer Weg: nach vollständiger Wiederholungszahl ins nächste Feld springen
     if (t.dataset.f === 'r' && v != null && !Number.isNaN(v) && (t.value.length >= 2 || v >= 4)) focusNext(t);
     return;
   }
+  if (t.dataset.note != null) { L.setNote(t.dataset.note, t.value); save(); return; }
+  if (t.dataset.slotNote != null) { L.setNote(t.dataset.slotNote, t.value); save(); return; }
   const p = currentPlan(); if (!p) return;
   if (t.dataset.planF === 'name') { if (t.value.trim()) { p.name = t.value.trim(); save(); } }
   else if (t.dataset.slot) {
@@ -749,7 +836,19 @@ $app.addEventListener('focusin', ev => {
   if (t.dataset && t.dataset.f === 'w') { const s = currentSession(); const w = s && s.exercises[+t.dataset.ex].sets[+t.dataset.set].w; t.dataset.before = w ?? ''; }
 });
 
+$app.addEventListener('focusout', ev => {
+  if (ev.target.classList && ev.target.classList.contains('note-input')) { editingNote = null; setTimeout(rerenderKeepScroll, 0); }
+});
+$app.addEventListener('click', ev => {
+  const hit = ev.target.closest && ev.target.closest('.hit');
+  if (!hit) return;
+  const wrap = hit.closest('.chart-wrap'), tip = wrap && wrap.querySelector('.chart-tip');
+  if (tip) { tip.textContent = hit.dataset.tip; tip.classList.add('on'); }
+  wrap.querySelectorAll('.hit.sel').forEach(x => x.classList.remove('sel')); hit.classList.add('sel');
+});
+
 $app.addEventListener('keydown', ev => {
+  if (ev.key === 'Enter' && ev.target.classList.contains('note-input')) { ev.preventDefault(); ev.target.blur(); return; }
   if (ev.key !== 'Enter' || !ev.target.dataset.f) return;
   ev.preventDefault(); focusNext(ev.target);
 });
@@ -778,6 +877,20 @@ $app.addEventListener('click', ev => {
     case 'take-all': fillFromPrev(s, +b.dataset.ex); save(); rerenderKeepScroll(); toast('Werte vom letzten Mal übernommen'); break;
     case 'take-group': s.exercises.forEach((e, i) => { if (e.group === b.dataset.group) fillFromPrev(s, i); }); save(); rerenderKeepScroll(); toast('Supersatz vorbefüllt'); break;
     case 'skip': ex.skipped = true; save(); rerenderKeepScroll(); break;
+    case 'add-warm': {
+      const first = ex.sets.find(x => !x.warm && x.w != null), step = ex.perDumbbell ? 1 : 2.5;
+      const w = first ? Math.max(step, Math.round(first.w * 0.5 / step) * step) : null;
+      const at = ex.sets.findIndex(x => !x.warm);
+      ex.sets.splice(at < 0 ? 0 : at, 0, { w, r: null, warm: true });
+      save(); rerenderKeepScroll(); toast('Aufwärmsatz hinzugefügt – zählt nicht in den Vergleich'); break;
+    }
+    case 'del-warm': {
+      const x = ex.sets[+b.dataset.set];
+      if (x && x.r != null && !confirm('Aufwärmsatz mit Werten entfernen?')) return;
+      ex.sets.splice(+b.dataset.set, 1); save(); rerenderKeepScroll(); break;
+    }
+    case 'note': editingNote = b.dataset.key; rerenderKeepScroll(); { const el = $app.querySelector('.note-input'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } } break;
+    case 'goal': db.settings = Object.assign({}, db.settings, { weeklyGoal: Math.min(7, Math.max(1, (db.settings?.weeklyGoal || 3) + +b.dataset.d)) }); save(); rerenderKeepScroll(); break;
     case 'unskip': ex.skipped = false; save(); rerenderKeepScroll(); break;
     case 'finish': {
       if (!s.exercises.some(e => validSets(e).length)) { toast('Trage mindestens einen Satz ein.'); return; }

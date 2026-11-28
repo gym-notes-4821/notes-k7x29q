@@ -288,6 +288,59 @@ test('Notizen hängen am Übungsnamen und folgen Umbenennungen', () => {
   assert.strictEqual(L.noteFor('latziehen'), 'Sitz 4, Griff breit', 'auch über den alten Namen auffindbar');
   L.setNote('latzug', ''); assert.strictEqual(L.noteFor('latzug'), '', 'leere Notiz löscht');
 });
+test('Coach: Verlauf erkennen – wenig Daten, steigend, Stagnation, Rückgang', () => {
+  const db = L.freshDb(); L.setDb(db);
+  db.sessions[0].date = L.addDaysISO(today, -21);
+  const d = k => L.addDaysISO(today, -21 + k * 3);
+  // Latziehen: steigt; Squats: bleibt 5× gleich (≥ 10 Tage); Kreuzheben: fällt; Bizepscurls: nur 2 Einträge
+  const lat = [[45, 12], [45, 12], [45, 11]], sq = [[10, 12], [10, 12], [10, 8]];
+  addTraining(db, d(1), { 'Latziehen': lat, 'Squats': sq, 'Kreuzheben': [[45, 12], [45, 10]], 'Bizepscurls': [[12, 14], [12, 13]] });
+  addTraining(db, d(2), { 'Latziehen': [[45, 12], [45, 12], [45, 12]], 'Squats': sq, 'Kreuzheben': [[45, 11], [45, 9]] });
+  addTraining(db, d(3), { 'Latziehen': [[47.5, 11], [45, 12], [45, 12]], 'Squats': sq, 'Kreuzheben': [[45, 10], [45, 8]] });
+  addTraining(db, d(4), { 'Latziehen': [[47.5, 12], [47.5, 11], [45, 12]], 'Squats': sq, 'Kreuzheben': [[42.5, 10], [42.5, 8]] });
+  addTraining(db, d(5), { 'Latziehen': [[47.5, 12], [47.5, 12], [45, 12]], 'Squats': sq, 'Kreuzheben': [[42.5, 9], [42.5, 8]] });
+  const st = n => L.exerciseState(L.normKey(n));
+  assert.strictEqual(st('Latziehen').state, 'up');
+  const sqs = st('Squats'); assert.strictEqual(sqs.state, 'stagnant'); assert.strictEqual(sqs.since, 5);
+  assert.strictEqual(st('Kreuzheben').state, 'down');
+  assert.strictEqual(st('Bizepscurls').state, 'few');
+  const r = L.coachReport(db.plans[0]);
+  const ex = n => r.exercises.find(e => e.name === n);
+  assert.ok(ex('Squats').alternatives.some(a => a.name === 'Beinpresse') && ex('Squats').tips.length === 3);
+  assert.ok(ex('Kreuzheben').alternatives.length >= 2);
+  assert.deepStrictEqual(ex('Latziehen').alternatives, [], 'keine Alternativen, wenn es läuft');
+  assert.strictEqual(r.counts.up, 1); assert.strictEqual(r.counts.stagnant, 1); assert.strictEqual(r.counts.down, 1);
+  assert.strictEqual(r.push, 7); assert.strictEqual(r.pull, 8);
+  assert.ok(r.minutes > 50 && r.minutes < 90, String(r.minutes));
+  assert.ok(r.weak.includes('Waden'));
+  assert.strictEqual(r.weeks.length, 4);
+});
+test('Coach: Ein einzelnes schwächeres Training ist noch kein Rückgang', () => {
+  const db = L.freshDb(); L.setDb(db);
+  db.sessions[0].date = L.addDaysISO(today, -18);
+  const d = k => L.addDaysISO(today, -18 + k * 3);
+  addTraining(db, d(1), { 'Latziehen': [[45, 13], [45, 12], [45, 11]] });
+  addTraining(db, d(2), { 'Latziehen': [[45, 14], [45, 13], [45, 12]] });
+  addTraining(db, d(3), { 'Latziehen': [[45, 15], [45, 14], [45, 13]] });
+  addTraining(db, d(4), { 'Latziehen': [[45, 11], [45, 10], [45, 10]] });   // schlechter Tag
+  assert.notStrictEqual(L.exerciseState('latziehen').state, 'down');
+  addTraining(db, d(5), { 'Latziehen': [[45, 11], [45, 10], [45, 9]] });    // zweites schwaches Training
+  assert.strictEqual(L.exerciseState('latziehen').state, 'down');
+});
+test('Coach: Alternativen für jede Übung des Standardplans, Tausch behält Sätze und Supersatz', () => {
+  const db = L.freshDb(); L.setDb(db);
+  for (const e of db.plans[0].exercises) assert.ok(L.alternativesFor(e.name).length >= 2, e.name);
+  assert.strictEqual(L.alternativesFor('Reverse Butterfly')[0].name, 'Reverse Butterfly an der Maschine');
+  assert.ok(!L.alternativesFor('Beinbeuger (Leg Curl)').some(a => /Curls/.test(a.name)), 'Leg Curl bekommt keine Bizeps-Alternativen');
+  const p = db.plans[0];
+  const bz = p.exercises.find(e => e.name === 'Bizepscurls');
+  assert.strictEqual(L.swapExercise(p, bz.id, 'Kabel-Curls'), 'Bizepscurls');
+  assert.ok(bz.name === 'Kabel-Curls' && bz.group === 'A' && bz.sets === 2 && bz.perDumbbell === false && bz.guide === null);
+  const sq = p.exercises.find(e => e.name === 'Squats');
+  L.swapExercise(p, sq.id, 'Bulgarische Split Squats');
+  assert.ok(sq.perDumbbell && sq.sets === 3 && sq.rest === 120);
+  assert.strictEqual(L.exerciseHistory('bulgarische split squats').length, 0, 'neue Übung, neuer Verlauf');
+});
 const v1 = require('./v1-sample.json'); // Daten im alten Format (Version 1)
 test('Migration: Version 1 lädt ohne Fehler, Trainings bleiben erhalten', () => {
   const d = L.migrate(v1); L.setDb(d);

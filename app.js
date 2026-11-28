@@ -56,6 +56,10 @@ const ICON_PATHS = {
   note: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4"/><path d="M12 13v4M8.5 20h7"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  coach: '<path d="M4 5h16v11H9.5L5 20v-4H4z"/><path d="M8.5 10.5l2.5 2.5 4.5-4.5"/>',
+  swap: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
+  check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
+  alert: '<path d="M12 4l9 16H3z"/><path d="M12 10v4M12 17v.01"/>',
   timer: '<circle cx="12" cy="13.5" r="7.5"/><path d="M12 9.5v4l2.5 2M10 3h4"/>',
   link: '<path d="M10 14a4.5 4.5 0 0 0 6.4.4l3-3a4.5 4.5 0 0 0-6.4-6.4l-1.4 1.4"/><path d="M14 10a4.5 4.5 0 0 0-6.4-.4l-3 3a4.5 4.5 0 0 0 6.4 6.4l1.4-1.4"/>',
   // Ampel-Symbole (gefüllt), damit die Bewertung auch ohne Farbe lesbar bleibt
@@ -348,6 +352,7 @@ const routes = [
   [/^#\/fortschritt$/, viewProgress],
   [/^#\/fortschritt\/uebung\/([^/]+)$/, key => viewExercise(key, false)],
   [/^#\/ausblick$/, viewOutlook],
+  [/^#\/coach$/, viewCoach],
   [/^#\/ausblick\/uebung\/([^/]+)$/, key => viewExercise(key, true)],
 ];
 let lastHash = location.hash;
@@ -384,6 +389,7 @@ function viewHome() {
       <a class="tile tile-main" href="#/training"><span class="ic">${icon('dumbbell')}</span><span class="tl">Training</span>${run ? '<span class="hint">Weitermachen</span>' : ''}</a>
       <a class="tile" href="#/fortschritt"><span class="ic">${icon('progress')}</span><span class="tl">Fortschritt</span></a>
       <a class="tile" href="#/ausblick"><span class="ic">${icon('outlook')}</span><span class="tl">Ausblick</span></a>
+      ${coachTile(plan)}
     </div></div>`;
 }
 
@@ -605,6 +611,68 @@ function viewOutlook() {
     const text = f.status === 'few' ? f.text : forecastText(ex.name, f, outlookDays).replace(`${ex.name}: `, '');
     return statusRow({ st, name: ex.name, text, meta, href: `#/ausblick/uebung/${encodeURIComponent(x.key)}`, perDumbbell: ex.perDumbbell });
   });
+  return h;
+}
+
+/* ---------------- Coach ---------------- */
+function coachTile(plan) {
+  const r = plan ? L.coachReport(plan) : null;
+  const n = r ? r.counts.stagnant + r.counts.down : 0;
+  const sub = !r ? 'Kein Plan' : n ? `${n} ${n === 1 ? 'Übung braucht' : 'Übungen brauchen'} Aufmerksamkeit` : r.counts.few === r.exercises.length ? 'Bewertet ab 4 Trainings' : 'Plan & Fortschritt im Check';
+  return `<a class="tile tile-coach" href="#/coach"><span class="ic">${icon('coach')}</span><span class="tc"><span class="tl">Coach</span><span class="tsub">${sub}</span></span>${n ? `<span class="hint">${n}</span>` : ''}</a>`;
+}
+const STATE = {
+  up: ['Steigend', 'up', 'stUp'], ok: ['Im Rahmen', 'same', 'stSame'], stagnant: ['Stagniert', 'same', 'stSame'],
+  down: ['Schwächer', 'down', 'stDown'], few: ['Zu wenig Daten', 'grey', 'stNone'],
+};
+function coachReason(x) {
+  if (x.state === 'down') return `Geschätztes Maximalgewicht zuletzt ${fmtNum(x.now)} kg – dein Bestwert war ${fmtNum(x.best)} kg (${fmtDate(x.bestDate, 'tiny')}). Über die letzten Trainings ging es eher nach unten.`;
+  if (x.state === 'stagnant') return `Seit ${x.since} Trainings (seit ${fmtDate(x.sinceDate, 'tiny')}) keine Steigerung mehr. Bestwert: ${fmtNum(x.best)} kg geschätztes Maximalgewicht.`;
+  return '';
+}
+function viewCoach() {
+  const plan = activePlan();
+  let h = topbar('Coach');
+  if (!plan) return h + '<p class="empty">Kein aktiver Plan.</p>';
+  const r = L.coachReport(plan), c = r.counts, issues = r.exercises.filter(x => x.state === 'stagnant' || x.state === 'down');
+  const rated = r.exercises.length - c.few;
+  let head, sub, cls;
+  if (!rated) { head = 'Noch zu wenig Daten'; sub = 'Ab 4 Trainings pro Übung kann ich deinen Verlauf bewerten. Bis dahin: dranbleiben!'; cls = 'grey'; }
+  else if (c.down && c.stagnant) { head = `${c.down + c.stagnant} Übungen brauchen Aufmerksamkeit`; sub = `${c.stagnant} ${c.stagnant === 1 ? 'stagniert' : 'stagnieren'}, ${c.down} ${c.down === 1 ? 'wird' : 'werden'} schwächer – mit kleinen Anpassungen geht es meist schnell wieder bergauf.`; cls = 'down'; }
+  else if (c.down) { head = `${c.down} ${c.down === 1 ? 'Übung wird' : 'Übungen werden'} schwächer`; sub = 'Kein Grund zur Sorge – mit kleinen Anpassungen geht es meist schnell wieder bergauf.'; cls = 'down'; }
+  else if (c.stagnant) { head = `${c.stagnant} ${c.stagnant === 1 ? 'Übung stagniert' : 'Übungen stagnieren'}`; sub = 'Der Rest läuft. Zeit für einen neuen Reiz bei diesen Übungen.'; cls = 'same'; }
+  else { head = 'Starke Entwicklung 💪'; sub = 'Keine Übung stagniert oder wird schwächer. Weiter so!'; cls = 'up'; }
+  h += `<p class="muted small">Plan: <b>${esc(plan.name)}</b> · bewertet aus deinen bisherigen Trainings</p>
+    <div class="coach-hero s-${cls}"><div class="ch-title">${head}</div><div class="ch-sub">${sub}</div>
+    <div class="ch-stats"><span class="s-up">${icon('stUp')}${c.up} steigend</span><span class="s-same">${icon('stSame')}${c.ok + c.stagnant} gleich</span><span class="s-down">${icon('stDown')}${c.down} schwächer</span></div></div>`;
+  if (issues.length) {
+    h += '<h2>Handlungsbedarf</h2>';
+    for (const x of issues) {
+      const [label, k] = STATE[x.state];
+      h += `<div class="coach-card s-${k}"><div class="prow-top"><span class="pname">${esc(x.name)}</span><span class="st">${icon(STATE[x.state][2])}${label}</span></div>
+        <p class="cc-reason">${esc(coachReason(x))}</p>
+        <div class="cc-label">Erst probieren</div><ul class="cc-tips">${x.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
+        ${x.alternatives.length ? `<div class="cc-label">Oder Übung wechseln</div><div class="cc-alts">${x.alternatives.map(a => `<button class="cc-alt" data-act="swap" data-ex="${esc(x.id)}" data-name="${esc(a.name)}">${icon('swap')}<span><b>${esc(a.name)}</b><small>${esc(a.why)}</small></span></button>`).join('')}</div>` : ''}
+        <a class="cc-link" href="#/fortschritt/uebung/${encodeURIComponent(x.key)}">Verlauf ansehen ›</a></div>`;
+    }
+  }
+  const good = r.exercises.filter(x => x.state === 'up');
+  if (good.length) h += `<h2>Läuft gut</h2><div class="card cc-good">${good.map(x => `<a href="#/fortschritt/uebung/${encodeURIComponent(x.key)}">${icon('stUp')}${esc(x.name)}</a>`).join('')}</div>`;
+  // Plan-Check
+  const checks = [];
+  const balanced = r.pull >= r.push * 0.8;
+  checks.push([balanced, `Drücken ${r.push} · Ziehen ${r.pull} Sätze pro Training`, balanced ? 'ausgewogen – gut für Haltung und Schultern' : 'mehr Zugübungen (z. B. Rudern) einplanen']);
+  checks.push([r.minutes <= 80, `Dauer ca. ${r.minutes} Minuten`, r.minutes <= 80 ? 'mit Pausen laut Plan und 10 min Aufwärmen' : 'recht lang – Supersätze oder weniger Sätze sparen Zeit']);
+  const avg = r.weeks.reduce((a, b) => a + b, 0) / r.weeks.length;
+  checks.push([avg >= r.goal * 0.75, `Regelmäßigkeit: Ø ${fmtNum(round1(avg))} von ${r.goal} Trainings pro Woche`, `letzte 4 Wochen: ${r.weeks.join(' · ')}`]);
+  const names = plan.exercises.map(e => normKey(e.name));
+  if (names.some(n => /squat|kniebeuge/.test(n)) && names.some(n => /kreuzheben/.test(n)))
+    checks.push([null, 'Squats und Kreuzheben in jedem Training', 'belastet den unteren Rücken – bei steigenden Gewichten abwechseln']);
+  if (r.weak.length) checks.push([null, `Kaum trainiert: ${r.weak.join(', ')}`, 'nur wichtig, wenn diese Bereiche für dich zählen']);
+  h += `<h2>Plan-Check</h2><div class="card cc-checks">${checks.map(([ok, t, d]) => `<div class="cc-check ${ok === true ? 'ok' : ok === false ? 'warn' : 'info'}">${icon(ok === true ? 'check' : ok === false ? 'alert' : 'stNone')}<span><b>${esc(t)}</b><small>${esc(d)}</small></span></div>`).join('')}</div>`;
+  const few = r.exercises.filter(x => x.state === 'few');
+  if (few.length && rated) h += `<p class="muted small" style="margin-top:12px">Noch zu wenig Daten (unter 4 Trainings): ${few.map(x => esc(x.name)).join(', ')}</p>`;
+  h += '<p class="muted small">Der Coach gibt allgemeine Trainingshinweise auf Basis deiner Einträge – keine medizinische Beratung.</p>';
   return h;
 }
 
@@ -890,6 +958,12 @@ $app.addEventListener('click', ev => {
       ex.sets.splice(+b.dataset.set, 1); save(); rerenderKeepScroll(); break;
     }
     case 'note': editingNote = b.dataset.key; rerenderKeepScroll(); { const el = $app.querySelector('.note-input'); if (el) { el.focus(); el.setSelectionRange(el.value.length, el.value.length); } } break;
+    case 'swap': {
+      const plan = activePlan(), name = b.dataset.name, e = plan && plan.exercises.find(x => x.id === b.dataset.ex);
+      if (!e) return;
+      if (!confirm(`„${e.name}“ im Plan durch „${name}“ ersetzen?\n\nSätze, Pause und Supersatz bleiben gleich. „${name}“ startet mit einem eigenen Verlauf – deine bisherigen Einträge bleiben im Fortschritt unter „Weitere Übungen“ erhalten.`)) return;
+      const old = L.swapExercise(plan, e.id, name); save(); rerenderKeepScroll(); toast(`${old} → ${name}`); break;
+    }
     case 'goal': db.settings = Object.assign({}, db.settings, { weeklyGoal: Math.min(7, Math.max(1, (db.settings?.weeklyGoal || 3) + +b.dataset.d)) }); save(); rerenderKeepScroll(); break;
     case 'unskip': ex.skipped = false; save(); rerenderKeepScroll(); break;
     case 'finish': {

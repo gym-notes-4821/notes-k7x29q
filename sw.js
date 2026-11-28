@@ -1,5 +1,5 @@
 // Service Worker: App-Dateien offline verfügbar machen (Cache zuerst, im Hintergrund aktualisieren)
-const CACHE = 'trainingsapp-v18';
+const CACHE = 'trainingsapp-v19';
 const ASSETS = ['./', './index.html', './logic.js', './app.js', './styles.css', './manifest.webmanifest',
   './icons/icon-180.png', './icons/icon-192.png', './icons/icon-512.png'];
 

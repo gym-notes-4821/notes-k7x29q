@@ -636,6 +636,112 @@ function setNote(key, text) {
   if (t) db.notes[canon(key)] = t; else delete db.notes[canon(key)];
 }
 
+/* ---------------- Coach ---------------- */
+/** Alternativen je Übung (Stichwort im Namen → Vorschläge mit kurzem Grund). Erste passende Regel gilt. */
+const ALTERNATIVES = [
+  // [Muster, [[Alternative, Grund, Kurzhantel?], …]] – spezielle Muster zuerst
+  [/vorgebeugt|reverse|face ?pull|hintere schulter/, [['Reverse Butterfly an der Maschine', 'stabil, leicht zu steigern', false], ['Face Pulls am Kabel', 'hintere Schulter plus oberer Rücken', false]]],
+  [/beinbeuger|leg ?curl/, [['Rumänisches Kreuzheben', 'Oberschenkel hinten in der Dehnung', false], ['Beinbeuger sitzend', 'anderer Winkel, mehr Dehnung', false]]],
+  [/beinstrecker|leg ?extension/, [['Bulgarische Split Squats', 'freie Übung für die Oberschenkel', true], ['Beinpresse', 'mehr Gesamtlast', false]]],
+  [/beinpresse/, [['Squats', 'freie Grundübung', false], ['Hackenschmidt', 'geführt, viel Last auf die Oberschenkel', false]]],
+  [/squat|kniebeuge|hackenschmidt/, [['Beinpresse', 'gleiche Muskeln, entlastet den unteren Rücken', false], ['Bulgarische Split Squats', 'einbeinig, gleicht Seitenunterschiede aus', true], ['Goblet Squats', 'aufrechter Oberkörper, gut für saubere Technik', true]]],
+  [/kreuzheben|deadlift/, [['Rumänisches Kreuzheben', 'mehr Fokus auf Oberschenkel hinten', false], ['Hip Thrust', 'starkes Gesäß, schont den Rücken', false], ['Trap-Bar-Kreuzheben', 'aufrechter, rückenfreundlicher', false]]],
+  [/latziehen|latzug|klimmz/, [['Latziehen eng (neutraler Griff)', 'anderer Winkel, oft mehr Gewicht möglich', false], ['Klimmzüge (assistiert)', 'freie Bewegung, viel Rumpfarbeit', false], ['Überzüge am Kabel', 'isoliert den breiten Rücken', false]]],
+  [/bankdrücken|bench|brustpresse/, [['Schrägbankdrücken mit Kurzhanteln', 'betont die obere Brust', true], ['Brustpresse an der Maschine', 'sicher bis ans Limit', false], ['Langhantel-Bankdrücken', 'mehr Gewicht, feinere Steigerung', false]]],
+  [/rudern|row/, [['Einarmiges Kurzhantelrudern', 'mehr Bewegungsweg, jede Seite einzeln', true], ['Brustgestütztes Rudern', 'kein Schwung, sauberer Reiz', false], ['Kabelrudern mit breitem Griff', 'mehr oberer Rücken und hintere Schulter', false]]],
+  [/butterfly|fly|fliegende|cross/, [['Kabel-Crossover', 'gleichmäßige Spannung über den ganzen Weg', false], ['Butterfly-Maschine', 'stabil, leicht zu steigern', false], ['Fliegende auf der Schrägbank', 'betont die obere Brust', true]]],
+  [/schulterdrücken|overhead|military/, [['Arnold Press', 'mehr Bewegungsweg, auch seitliche Schulter', true], ['Schulterpresse an der Maschine', 'sicher bis ans Limit', false], ['Landmine Press', 'schonender Winkel für die Schulter', false]]],
+  [/seitheben|lateral/, [['Kabel-Seitheben', 'Spannung auch unten in der Bewegung', false], ['Seitheben an der Maschine', 'kein Schwung möglich', false], ['Seitheben liegend auf der Schrägbank', 'betont den oberen Teil der Bewegung', true]]],
+  [/hammer/, [['Hammercurls am Kabel mit Seil', 'gleichmäßige Spannung', false], ['Cross-Body-Curls', 'anderer Winkel für den Oberarmmuskel', true]]],
+  [/trizeps|triceps|push.?down|french|skull/, [['Überkopf-Trizepsdrücken am Kabel', 'dehnt den langen Trizepskopf', false], ['French Press mit SZ-Stange', 'viel Gewicht möglich', false], ['Dips', 'Grundübung mit Körpergewicht', false]]],
+  [/curl|bizeps/, [['Schrägbank-Curls', 'mehr Dehnung im Bizeps', true], ['Kabel-Curls', 'Spannung über den ganzen Weg', false], ['SZ-Curls an der Scott-Bank', 'kein Schwung, isoliert', false]]],
+  [/crunch|bauch|beinheben/, [['Beinheben liegend', 'unterer Bauch, ohne Griffkraft', false], ['Ab-Roller', 'sehr intensiv für den ganzen Rumpf', false], ['Crunch-Maschine', 'leicht zu steigern', false]]],
+];
+function alternativesFor(name) {
+  const n = normKey(name);
+  const hit = ALTERNATIVES.find(([re]) => re.test(n));
+  return hit ? hit[1].filter(([alt]) => normKey(alt) !== n).map(([alt, why, pd]) => ({ name: alt, why, perDumbbell: !!pd })) : [];
+}
+/** Tipps, bevor man eine Übung tauscht. */
+function coachTips(state) {
+  return state === 'down'
+    ? ['Erholung prüfen: Schlaf, Essen und genug Pause zwischen den Trainings', 'Eine leichtere Woche einlegen (ca. 10 % weniger Gewicht), dann wieder steigern', 'Pausen zwischen den Sätzen verlängern (2–3 Minuten bei Grundübungen)']
+    : ['Gewicht eine Stufe runter und die Wiederholungen bis 15 hochziehen', 'Pause zwischen den Sätzen verlängern', 'Technik prüfen: langsam ablassen, voller Bewegungsweg'];
+}
+/**
+ * Verlauf einer Übung einschätzen:
+ *  up       – zuletzt verbessert
+ *  ok       – normale Schwankung
+ *  stagnant – seit mind. 4 Trainings (und 10 Tagen) keine Verbesserung
+ *  down     – über mehrere Trainings schwächer (2 von 3 Vergleichen ohne Verbesserung, oder 2× in Folge > 5 % unter dem Bestwert)
+ *  few      – zu wenig Daten (weniger als 4 Trainings)
+ */
+function exerciseState(key) {
+  const h = exerciseHistory(key);
+  if (h.length < 4) return { state: 'few', n: h.length };
+  const e = h.map(x => bestE1(x.sets));
+  // Letzte Verbesserung: besser als das Training davor oder > 1 % über dem bisherigen Bestwert
+  let best = e[0], lastImp = 0;
+  for (let i = 1; i < h.length; i++) {
+    const up = compareSets(h[i].sets, h[i - 1].sets).status === 'up';
+    if (up || e[i] > best * 1.01) lastImp = i;
+    if (e[i] > best) best = e[i];
+  }
+  const last = h.length - 1, since = last - lastImp;
+  const recent = h.slice(-4).map((x, k, a) => k ? compareSets(x.sets, a[k - 1].sets).status : null).slice(1);
+  // Rückgang erst über mehrere Trainings: die letzten zwei liegen beide > 5 % unter dem Bestwert davor
+  const ref = Math.max(...e.slice(-8, -2));
+  const drop = (e[last] / ref - 1) * 100, drop2 = (e[last - 1] / ref - 1) * 100;
+  const base = { n: h.length, lastDate: h[last].session.date, best: round1(Math.max(...e)), now: round1(e[last]), since,
+    bestDate: h[e.indexOf(Math.max(...e))].session.date };
+  if ((recent.filter(x => x === 'down').length >= 2 && !recent.includes('up')) || (drop <= -5 && drop2 <= -5)) return { ...base, state: 'down', drop: round1(drop) };
+  const span = dayNum(h[last].session.date) - dayNum(h[lastImp].session.date);
+  if (since >= 4 && span >= 10) return { ...base, state: 'stagnant', sinceDate: h[lastImp].session.date };
+  if (since === 0) return { ...base, state: 'up' };
+  return { ...base, state: 'ok' };
+}
+/** Geschätzte Trainingsdauer in Minuten (Arbeitszeit ca. 40 s pro Satz, Pausen laut Plan, 10 min Aufwärmen). */
+function estimateMinutes(plan) {
+  let sec = 600;
+  for (const b of blocks(plan.exercises)) {
+    if (!b.group) { const e = b.items[0].ex; sec += e.sets * (40 + restOf(e)); continue; }
+    const rounds = Math.max(...b.items.map(i => i.ex.sets));
+    sec += rounds * (b.items.length * 40 + Math.max(...b.items.map(i => restOf(i.ex))));
+  }
+  return Math.round(sec / 60);
+}
+/** Gesamtbewertung für den Coach. */
+function coachReport(plan, refISO = todayISO()) {
+  const exercises = plan.exercises.map(e => {
+    const key = normKey(e.name), st = exerciseState(key);
+    return { name: e.name, id: e.id, key, ...st, alternatives: ['stagnant', 'down'].includes(st.state) ? alternativesFor(e.name) : [], tips: ['stagnant', 'down'].includes(st.state) ? coachTips(st.state) : [] };
+  });
+  // Drücken/Ziehen nach Hauptmuskeln
+  let push = 0, pull = 0;
+  for (const e of plan.exercises) {
+    const m = musclesOf(e.name) || {};
+    if (m.chest === 1 || (m.shoulders === 1 && m.triceps)) push += e.sets;
+    else if (m.lats === 1 || m.upperback === 1 || m.reardelts === 1) pull += e.sets;
+  }
+  const load = planMuscleLoad(plan).load;
+  const weak = MUSCLES.filter(([id]) => muscleLevel(load[id]) <= 1).map(([, n]) => n);
+  // Regelmäßigkeit: letzte 4 Kalenderwochen inkl. der aktuellen
+  const weeks = [0, 1, 2, 3].map(k => weekCount(addDaysISO(refISO, -7 * k))).reverse();
+  const goal = (db.settings && db.settings.weeklyGoal) || 3;
+  const count = st => exercises.filter(x => x.state === st).length;
+  return { exercises, push, pull, weak, minutes: estimateMinutes(plan), weeks, goal,
+    counts: { up: count('up'), ok: count('ok'), stagnant: count('stagnant'), down: count('down'), few: count('few') } };
+}
+/** Übung im Plan durch eine Alternative ersetzen (Sätze, Supersatz und Platz bleiben; neuer Name = neuer Verlauf). */
+function swapExercise(plan, exId, newName) {
+  const e = plan.exercises.find(x => x.id === exId);
+  if (!e) return null;
+  const old = e.name, alt = alternativesFor(old).find(a => a.name === newName);
+  e.name = newName; e.guide = null; e.perDumbbell = alt ? alt.perDumbbell : false;
+  if (!e.group) e.rest = defaultRest(newName);
+  return old;
+}
+
 /* ---------------- Supersätze ---------------- */
 /** Gruppiert aufeinanderfolgende Übungen derselben Supersatz-Gruppe zu Blöcken. */
 function blocks(exs) {
@@ -729,7 +835,8 @@ const api = {
   setDb, getDb, canon, sameEx, renameExercise, sessionOrder, doneSessions, isValidSet, validSets, bestE1, bestSetByE1, exerciseHistory, previousEntry,
   rankSets, cmpPair, compareSets, diffText, explain, trendFor, analyzeExercise, latestProgress, planProgress,
   forecastFor, forecastText, planForecast, blocks, normalizeGroups, MAX_WEEKLY, TAU_WEEKS, effWeeks, isWorkSet,
-  recordsFor, sessionStats, shortDelta, weekCount, noteFor, setNote, MUSCLES, musclesOf, planMuscleLoad, muscleLevel, prefillWeights, isUntouched,
+  recordsFor, sessionStats, shortDelta, weekCount, noteFor, setNote,
+  ALTERNATIVES, alternativesFor, exerciseState, coachReport, estimateMinutes, swapExercise, coachTips, MUSCLES, musclesOf, planMuscleLoad, muscleLevel, prefillWeights, isUntouched,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.Logic = api;

@@ -21,8 +21,8 @@ const STORE = 'trainingsapp.v1';
 
   // 1. Startseite + Planauswahl
   await go('');
-  ok(await page.locator('.tile').count() === 4, '1 Startseite zeigt vier Kacheln');
-  ok((await page.locator('.tile .tl').allInnerTexts()).join('|') === 'Trainingspläne|Training|Fortschritt|Ausblick', '1 Kacheln in richtiger Reihenfolge');
+  ok(await page.locator('.tile').count() === 5, '1 Startseite zeigt fünf Kacheln');
+  ok((await page.locator('.tile .tl').allInnerTexts()).join('|') === 'Trainingspläne|Training|Fortschritt|Ausblick|Coach', '1 Kacheln in richtiger Reihenfolge');
   ok((await page.locator('.active-plan').innerText()).includes('Ganzkörperplan'), '1 Aktiver Plan angezeigt');
   ok(await page.locator('#tabbar').count() === 0, '1 Keine Tab-Leiste mehr');
   await shot(page, '1-start');
@@ -270,8 +270,41 @@ const STORE = 'trainingsapp.v1';
   // Offline
   await go(''); await page.waitForTimeout(800);
   await ctx.setOffline(true); await page.reload();
-  ok(await page.locator('.tile').count() === 4, 'App lädt offline');
+  ok(await page.locator('.tile').count() === 5, 'App lädt offline');
   await ctx.setOffline(false);
+
+  // Coach: Stagnation und Rückgang erkennen, Alternativen vorschlagen und tauschen
+  const ctx3 = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const p3 = await ctx3.newPage(); p3.on('dialog', d => d.accept());
+  let err3 = 0; p3.on('pageerror', e => { console.log('PAGEERROR', e.message); err3++; });
+  await p3.goto(URL); await p3.evaluate(() => localStorage.clear()); await p3.reload(); await p3.waitForSelector('.tile');
+  await p3.evaluate(k => {
+    const L = window.Logic, d = L.freshDb(), plan = d.plans[0], t = L.todayISO();
+    d.sessions[0].date = L.addDaysISO(t, -21);
+    const rows = { 'Squats': i => [[10, 12], [10, 12], [10, 8]], 'Kreuzheben': i => [[45 - (i > 2 ? 2.5 : 0), 12 - i], [45, 9]], 'Latziehen': i => [[45 + 2.5 * i, 12], [45, 12], [45, 10]] };
+    for (let i = 1; i <= 5; i++) {
+      const s = L.newSession(plan, L.addDaysISO(t, -21 + 3 * i)); s.status = 'done'; s.createdAt = Date.now() - (10 - i) * 1e5;
+      s.exercises.forEach(ex => { if (rows[ex.name]) ex.sets = rows[ex.name](i).map(([w, r]) => ({ w, r })); else ex.skipped = true; });
+      d.sessions.push(s);
+    }
+    localStorage.setItem(k, JSON.stringify(d));
+  }, STORE);
+  await p3.reload(); await p3.waitForSelector('.tile-coach');
+  ok((await p3.locator('.tile-coach').innerText()).includes('2 Übungen brauchen Aufmerksamkeit'), 'Coach-Kachel zeigt 2 Hinweise');
+  await p3.click('.tile-coach'); await p3.waitForSelector('.coach-hero');
+  ok((await p3.locator('.coach-hero').innerText()).includes('2 Übungen brauchen Aufmerksamkeit'), 'Coach: Gesamtbewertung');
+  const sqCard = p3.locator('.coach-card', { has: p3.locator('.pname', { hasText: /^Squats$/ }) });
+  ok((await sqCard.innerText()).includes('Stagniert') && (await sqCard.innerText()).includes('Seit 5 Trainings'), 'Coach: Squats stagniert seit 5 Trainings');
+  ok((await p3.locator('.coach-card', { has: p3.locator('.pname', { hasText: /^Kreuzheben$/ }) }).innerText()).includes('Schwächer'), 'Coach: Kreuzheben wird schwächer');
+  ok((await p3.locator('.cc-good').innerText()).includes('Latziehen'), 'Coach: Latziehen läuft gut');
+  ok(await p3.locator('.cc-check').count() >= 3, 'Coach: Plan-Check');
+  await sqCard.locator('.cc-alt', { hasText: 'Beinpresse' }).click(); await p3.waitForTimeout(150);
+  const plan3 = await p3.evaluate(k => JSON.parse(localStorage.getItem(k)).plans[0].exercises.map(e => e.name), STORE);
+  ok(plan3[0] === 'Beinpresse' && !plan3.includes('Squats'), 'Coach: Übung per Tipp im Plan getauscht');
+  ok(!(await p3.locator('.coach-card .pname', { hasText: /^Squats$/ }).count()), 'Getauschte Übung verschwindet aus dem Handlungsbedarf');
+  const sw3 = await p3.evaluate(() => document.documentElement.scrollWidth); ok(sw3 <= 390, 'Coach: keine Überbreite');
+  ok(err3 === 0, 'Coach: keine Fehler');
+  await ctx3.close();
 
   // 8. Migration Version 1 in frischem Kontext
   const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });

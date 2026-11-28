@@ -56,6 +56,9 @@ const ICON_PATHS = {
   note: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4"/><path d="M12 13v4M8.5 20h7"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  faceGood: '<circle cx="12" cy="12" r="9"/><path d="M7.8 13.8c1.1 2 2.5 3 4.2 3s3.1-1 4.2-3"/><path d="M9 9.6v.6M15 9.6v.6" stroke-width="2.6"/>',
+  faceOk: '<circle cx="12" cy="12" r="9"/><path d="M8.5 15.3h7"/><path d="M9 9.6v.6M15 9.6v.6" stroke-width="2.6"/>',
+  faceBad: '<circle cx="12" cy="12" r="9"/><path d="M7.8 16.8c1.1-1.8 2.5-2.6 4.2-2.6s3.1.8 4.2 2.6"/><path d="M9 9.6v.6M15 9.6v.6" stroke-width="2.6"/>',
   bolt: '<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>',
   coach: '<path d="M4 5h16v11H9.5L5 20v-4H4z"/><path d="M8.5 10.5l2.5 2.5 4.5-4.5"/>',
   swap: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
@@ -162,9 +165,9 @@ const STATUS = {
   ffew: { label: 'Zu wenig Daten', icon: 'stNone' },
 };
 const CLS = { up: 'up', same: 'same', down: 'down', none: 'grey', skipped: 'grey', fup: 'up', fflat: 'same', ffew: 'grey' };
-function statusRow({ st, name, text, meta, href, perDumbbell, prs = [] }) {
+function statusRow({ st, name, text, meta, href, perDumbbell, prs = [], feel }) {
   return `<a class="prow s-${CLS[st]}" href="${href}">
-    <div class="prow-top"><span class="pname">${esc(name)}${perDumbbell ? ' <span class="pd">pro Hantel</span>' : ''}</span>
+    <div class="prow-top"><span class="pname">${esc(name)}${perDumbbell ? ' <span class="pd">pro Hantel</span>' : ''}${feel ? ' ' + feelChip(feel) : ''}</span>
     <span class="st">${icon(STATUS[st].icon)}${STATUS[st].label}</span></div>
     ${prs.map(r => `<div class="pr-line">${icon('trophy')}${esc(r.text)}</div>`).join('')}
     <div class="ptext">${esc(text)}</div>${meta ? `<div class="pmeta">${meta}</div>` : ''}</a>`;
@@ -425,6 +428,30 @@ function lastLine(s, ex) {
   if (ex.guide != null) return `<p class="last">Noch kein Eintrag · Orientierung <b>${fmtNum(ex.guide)} kg</b></p>`;
   return '<p class="last">Noch kein Eintrag</p>';
 }
+/* ---- Gefühl je Übung ---- */
+const FEEL_UI = { good: ['faceGood', 'gut', 'da war noch Luft'], ok: ['faceOk', 'okay', 'passend anstrengend'], bad: ['faceBad', 'schlecht', 'zu schwer, unsauber oder gezwickt'] };
+const feelChip = v => v ? `<span class="feel-chip f-${v}">${icon(FEEL_UI[v][0])}${FEEL_UI[v][1]}</span>` : '';
+/** Bewertung erscheint, sobald der letzte Arbeitssatz der Übung eingetragen ist. */
+function feelReady(ex) {
+  if (ex.skipped) return false;
+  const work = ex.sets.filter(x => !x.warm);
+  return work.length > 0 && isValidSet(work[work.length - 1]);
+}
+function feelButtons(ex, i) {
+  return `<div class="feel-btns" role="group" aria-label="Wie lief ${esc(ex.name)}?">${L.FEELS.map(v => `<button class="feel-btn f-${v} ${ex.feel === v ? 'on' : ''}" data-act="feel" data-ex="${i}" data-v="${v}" aria-pressed="${ex.feel === v}" aria-label="${FEEL_UI[v][1]}: ${FEEL_UI[v][2]}">${icon(FEEL_UI[v][0])}<small>${FEEL_UI[v][1]}</small></button>`).join('')}</div>`;
+}
+function feelSlotHTML(s, i) {
+  const ex = s.exercises[i];
+  if (!ex.group) return feelReady(ex) ? `<div class="feel"><span class="feel-q">Wie lief's?</span>${feelButtons(ex, i)}</div>` : '';
+  const rows = s.exercises.map((e, k) => [e, k]).filter(([e]) => e.group === ex.group && feelReady(e));
+  return rows.length ? `<div class="feel ss-feel"><span class="feel-q">Wie liefen die Übungen?</span>${rows.map(([e, k]) => `<div class="feel-ss-row"><b>${esc(e.name)}</b>${feelButtons(e, k)}</div>`).join('')}</div>` : '';
+}
+const feelSlot = (s, i) => `<div class="feel-slot" data-feel-slot="${s.exercises[i].group ? 'g' + s.exercises[i].group : i}">${feelSlotHTML(s, i)}</div>`;
+function refreshFeel(s, i) {
+  const ex = s.exercises[i], el = $app.querySelector(`[data-feel-slot="${ex.group ? 'g' + ex.group : i}"]`);
+  if (el) el.innerHTML = feelSlotHTML(s, i);
+}
+
 let editingNote = null;
 function noteBlock(key) {
   const n = L.noteFor(key);
@@ -456,6 +483,7 @@ function singleCard(s, ex, i) {
   return `<section class="ex-card" data-card="${i}">${head}${lastLine(s, ex)}
     <div class="sets"><div class="set-head single"><span></span><span>kg${ex.perDumbbell ? ' / Hantel' : ''}</span><span></span><span>Wdh.</span><span>Zuletzt</span></div>${rows}</div>
     <button class="add-warm" data-act="add-warm" data-ex="${i}">${icon('plus')}Aufwärmsatz</button>
+    ${feelSlot(s, i)}
     <div class="ex-actions"><button class="btn-take" data-act="take-all" data-ex="${i}" ${prev ? '' : 'disabled'}>Wie letztes Mal</button>
     <button data-act="skip" data-ex="${i}">Überspringen</button></div></section>`;
 }
@@ -480,6 +508,7 @@ function supersetCard(s, b) {
     h += '</div>';
   }
   const anyPrev = prevs.some(Boolean);
+  h += feelSlot(s, items[0].idx);
   return h + `<div class="ex-actions"><button class="btn-take" data-act="take-group" data-group="${esc(b.group)}" ${anyPrev ? '' : 'disabled'}>Wie letztes Mal</button></div></section>`;
 }
 function viewWorkout(id) {
@@ -539,10 +568,12 @@ function viewResult(id) {
     h += `<div class="pr-box"><div class="pr-head">${icon('trophy')}${prCount === 1 ? 'Neuer Rekord' : `${prCount} neue Rekorde`}</div>${items.slice(0, 4).join('')}
       ${items.length > 4 ? `<details class="pr-more"><summary>${items.length - 4} weitere Rekorde anzeigen</summary>${items.slice(4).join('')}</details>` : ''}</div>`;
   }
+  const df = L.dayFeel(s);
+  if (df.tough) h += `<div class="card day-tough">${icon('faceBad')}<span><b>Heute insgesamt schwer?</b><small>${df.bad} von ${df.rated} Übungen mit „schlecht“ bewertet. Das liegt oft an Schlaf, Stress oder Essen – nicht an den Übungen. Gönn dir Erholung.</small></span></div>`;
   h += counts(res.map(a => a.status));
   if (s.status === 'active') h += `<p class="card small">Dieses Training läuft noch. <a href="#/training/${s.id}">Weiter eintragen</a></p>`;
   h += groupedList(s.exercises, (ex, i) => statusRow({ st: res[i].status, name: ex.name, text: res[i].text, meta: metaFor(res[i]),
-    href: `#/fortschritt/uebung/${encodeURIComponent(ex.key)}`, perDumbbell: ex.perDumbbell, prs: prs[i] }));
+    href: `#/fortschritt/uebung/${encodeURIComponent(ex.key)}`, perDumbbell: ex.perDumbbell, prs: prs[i], feel: ex.feel }));
   h += `<div class="stack" style="margin-top:16px"><a class="btn btn-ghost btn-block" href="#/training/${s.id}">Training korrigieren</a>
     <a class="btn btn-primary btn-block btn-big" href="#/">Fertig</a></div>`;
   return h;
@@ -625,7 +656,7 @@ function viewOutlook() {
 /* ---------------- Coach ---------------- */
 function coachTile(plan) {
   const r = plan ? L.coachReport(plan) : null;
-  const n = r ? r.counts.stagnant + r.counts.down : 0;
+  const n = r ? r.counts.issues : 0;
   const sub = !r ? 'Kein Plan' : n ? `${n} ${n === 1 ? 'Hinweis' : 'Hinweise'}` : r.counts.few === r.exercises.length ? 'ab 4 Trainings' : 'alles im Plan';
   return `<a class="tile tile-small" href="#/coach"><span class="ic">${icon('coach')}</span><span class="tc"><span class="tl">Coach</span><span class="tsub ${n ? 'warn' : ''}">${sub}</span></span>${n ? `<span class="hint">${n}</span>` : ''}</a>`;
 }
@@ -647,13 +678,14 @@ function viewCoach() {
   const plan = activePlan();
   let h = topbar('Coach');
   if (!plan) return h + '<p class="empty">Kein aktiver Plan.</p>';
-  const r = L.coachReport(plan), c = r.counts, issues = r.exercises.filter(x => x.state === 'stagnant' || x.state === 'down');
+  const r = L.coachReport(plan), c = r.counts, issues = r.exercises.filter(x => x.issue);
   const rated = r.exercises.length - c.few;
   let head, sub, cls;
   if (!rated) { head = 'Noch zu wenig Daten'; sub = 'Ab 4 Trainings pro Übung kann ich deinen Verlauf bewerten. Bis dahin: dranbleiben!'; cls = 'grey'; }
   else if (c.down && c.stagnant) { head = `${c.down + c.stagnant} Übungen brauchen Aufmerksamkeit`; sub = `${c.stagnant} ${c.stagnant === 1 ? 'stagniert' : 'stagnieren'}, ${c.down} ${c.down === 1 ? 'wird' : 'werden'} schwächer – mit kleinen Anpassungen geht es meist schnell wieder bergauf.`; cls = 'down'; }
   else if (c.down) { head = `${c.down} ${c.down === 1 ? 'Übung wird' : 'Übungen werden'} schwächer`; sub = 'Kein Grund zur Sorge – mit kleinen Anpassungen geht es meist schnell wieder bergauf.'; cls = 'down'; }
   else if (c.stagnant) { head = `${c.stagnant} ${c.stagnant === 1 ? 'Übung stagniert' : 'Übungen stagnieren'}`; sub = 'Der Rest läuft. Zeit für einen neuen Reiz bei diesen Übungen.'; cls = 'same'; }
+  else if (c.feelBad) { head = `${c.feelBad} ${c.feelBad === 1 ? 'Übung fühlt' : 'Übungen fühlen'} sich oft schlecht an`; sub = 'Die Zahlen sind noch okay – aber dein Gefühl sagt etwas anderes. Schau dir die Hinweise an.'; cls = 'down'; }
   else { head = 'Starke Entwicklung 💪'; sub = 'Keine Übung stagniert oder wird schwächer. Weiter so!'; cls = 'up'; }
   h += `<p class="muted small">Plan: <b>${esc(plan.name)}</b> · bewertet aus deinen bisherigen Trainings</p>
     <div class="coach-hero s-${cls}"><div class="ch-title">${head}</div><div class="ch-sub">${sub}</div>
@@ -661,14 +693,20 @@ function viewCoach() {
   if (issues.length) {
     h += '<h2>Handlungsbedarf</h2>';
     for (const x of issues) {
-      const [label, k] = STATE[x.state];
-      h += `<div class="coach-card s-${k}"><div class="prow-top"><span class="pname">${esc(x.name)}</span><span class="st">${icon(STATE[x.state][2])}${label}</span></div>
-        <p class="cc-reason">${esc(coachReason(x))}</p>
+      const feelOnly = !['stagnant', 'down'].includes(x.state);
+      const [label, k, ic] = feelOnly ? ['Fühlt sich schlecht an', 'bad', 'faceBad'] : STATE[x.state];
+      let reason = feelOnly ? `In ${x.feel.feels.filter(f => f === 'bad').length} der letzten ${x.feel.feels.length} Trainings mit „schlecht“ bewertet – auch wenn die Zahlen noch passen.` : coachReason(x);
+      if (!feelOnly && x.feelTrend === 'bad') reason += ' Dazu fühlte es sich zuletzt eher schlecht an – also zuerst Erholung.';
+      if (!feelOnly && x.feelTrend === 'good') reason += ' Es fühlt sich aber gut an – der Reiz ist vermutlich zu sanft.';
+      h += `<div class="coach-card s-${k}"><div class="prow-top"><span class="pname">${esc(x.name)}</span><span class="st">${icon(ic)}${label}</span></div>
+        <p class="cc-reason">${esc(reason)}</p>
         <div class="cc-label">Erst probieren</div><ul class="cc-tips">${x.tips.map(t => `<li>${esc(t)}</li>`).join('')}</ul>
         ${x.alternatives.length ? `<div class="cc-label">Oder Übung wechseln</div><div class="cc-alts">${x.alternatives.map(a => `<button class="cc-alt" data-act="swap" data-ex="${esc(x.id)}" data-name="${esc(a.name)}">${icon('swap')}<span><b>${esc(a.name)}</b><small>${esc(a.why)}</small></span></button>`).join('')}</div>` : ''}
         <a class="cc-link" href="#/fortschritt/uebung/${encodeURIComponent(x.key)}">Verlauf ansehen ›</a></div>`;
     }
   }
+  const ready = r.exercises.filter(x => x.feel && x.feel.type === 'ready' && !x.issue);
+  if (ready.length) h += `<h2>Bereit für mehr</h2><div class="card cc-ready">${ready.map(x => `<a href="#/fortschritt/uebung/${encodeURIComponent(x.key)}">${icon('faceGood')}<span><b>${esc(x.name)}</b><small>2× in Folge „gut“ – ${x.feel.more === 'weight' ? 'nächstes Mal eine Gewichtsstufe höher' : 'mehr Wiederholungen anpeilen'}</small></span></a>`).join('')}</div>`;
   const good = r.exercises.filter(x => x.state === 'up');
   if (good.length) h += `<h2>Läuft gut</h2><div class="card cc-good">${good.map(x => `<a href="#/fortschritt/uebung/${encodeURIComponent(x.key)}">${icon('stUp')}${esc(x.name)}</a>`).join('')}</div>`;
   // Plan-Check
@@ -678,6 +716,8 @@ function viewCoach() {
   checks.push([r.minutes <= 80, `Dauer ca. ${r.minutes} Minuten`, r.minutes <= 80 ? 'mit Pausen laut Plan und 10 min Aufwärmen' : 'recht lang – Supersätze oder weniger Sätze sparen Zeit']);
   const avg = r.weeks.reduce((a, b) => a + b, 0) / r.weeks.length;
   checks.push([avg >= r.goal * 0.75, `Regelmäßigkeit: Ø ${fmtNum(round1(avg))} von ${r.goal} Trainings pro Woche`, `letzte 4 Wochen: ${r.weeks.join(' · ')}`]);
+  const lastS = doneSessions().filter(x => x.kind !== 'baseline').at(-1);
+  if (lastS && L.dayFeel(lastS).tough) checks.push([false, `Letztes Training (${fmtDate(lastS.date, 'tiny')}) fühlte sich schwer an`, 'viele „schlecht“-Bewertungen – eher Tagesform: Schlaf, Stress, Essen']);
   const md = L.maxTestDue();
   checks.push([md.last ? !md.due : null, md.last ? `Maximalkrafttest zuletzt am ${fmtDate(md.last, 'tiny')}` : 'Noch kein Maximalkrafttest', md.last ? (md.due ? 'fällig – unter „Maximalkraft“ starten' : `nächster in ${md.inDays} Tagen`) : 'ermittle deinen Ausgangswert unter „Maximalkraft“']);
   const names = plan.exercises.map(e => normKey(e.name));
@@ -826,7 +866,7 @@ function viewExercise(key, outlook) {
     const a = analyzeExercise(s, ex);
     h += `<tr><td><a href="#/ergebnis/${s.id}">${fmtDate(s.date)}</a>${s.kind === 'baseline' ? '<br><span class="tag">Startwerte</span>' : ''}${ex.name !== name ? `<br><span class="muted small">als ${esc(ex.name)}</span>` : ''}</td>
       <td>${ex.skipped ? '<span class="muted">übersprungen</span>' : validSets(ex).map(x => `${fmtNum(x.w)} × ${x.r}`).join('<br>')}</td>
-      <td><span class="st-mini s-${CLS[a.status]}">${icon(STATUS[a.status].icon)}${STATUS[a.status].label}</span></td></tr>`;
+      <td><span class="st-mini s-${CLS[a.status]}">${icon(STATUS[a.status].icon)}${STATUS[a.status].label}</span>${ex.feel ? `<br>${feelChip(ex.feel)}` : ''}</td></tr>`;
   }
   return h + '</table>';
 }
@@ -963,7 +1003,7 @@ $app.addEventListener('input', ev => {
     t.classList.toggle('invalid', Number.isNaN(v));
     set[t.dataset.f] = Number.isNaN(v) ? null : v;
     if (!wasValid && isValidSet(set) && !s.startedAt && s.status === 'active') s.startedAt = Date.now();
-    save(); markRow(i, j);
+    save(); markRow(i, j); refreshFeel(s, i);
     { const st = document.getElementById('wk-stats'); if (st) st.innerHTML = liveStats(s); }
     if (!wasValid) Rest.afterSet(s, i, j, t);
     // Kurzer Weg: nach vollständiger Wiederholungszahl ins nächste Feld springen
@@ -1064,7 +1104,7 @@ $app.addEventListener('click', ev => {
       const i = +b.dataset.ex, j = +b.dataset.set, set = ex.sets[j];
       const wasValid = isValidSet(set);
       set.w = parseFloat(b.dataset.w); set.r = parseInt(b.dataset.r, 10);
-      setInput(i, j, 'w', set.w); setInput(i, j, 'r', set.r); save(); markRow(i, j);
+      setInput(i, j, 'w', set.w); setInput(i, j, 'r', set.r); save(); markRow(i, j); refreshFeel(s, i);
       if (!wasValid) Rest.afterSet(s, i, j, inputEl(i, j, 'r'));
       break;
     }
@@ -1089,6 +1129,11 @@ $app.addEventListener('click', ev => {
       if (!e) return;
       if (!confirm(`„${e.name}“ im Plan durch „${name}“ ersetzen?\n\nSätze, Pause und Supersatz bleiben gleich. „${name}“ startet mit einem eigenen Verlauf – deine bisherigen Einträge bleiben im Fortschritt unter „Weitere Übungen“ erhalten.`)) return;
       const old = L.swapExercise(plan, e.id, name); save(); rerenderKeepScroll(); toast(`${old} → ${name}`); break;
+    }
+    case 'feel': {
+      const v = b.dataset.v; ex.feel = ex.feel === v ? undefined : v; save(); refreshFeel(s, +b.dataset.ex);
+      if (ex.feel) toast(`${ex.name}: ${FEEL_UI[v][1]}`);
+      break;
     }
     case 'max-start': {
       let t = (db.maxTests || []).find(x => x.status === 'active');

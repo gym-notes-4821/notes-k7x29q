@@ -500,3 +500,32 @@ svg .fline { fill: none; }
 .tile-small .ic { width: 36px; height: 36px; border-radius: 11px; }
 .tile-small .ic .i { width: 21px; height: 21px; }
 .mx-row .c-delta { white-space: normal; }
+
+/* ---------------- Gefühl je Übung ---------------- */
+:root { --bad: #ff4d4d; }
+.feel { margin: 8px 0 4px; padding: 10px; border-radius: 14px; background: #0a0a0a; border: 1px solid var(--line); }
+.feel-q { display: block; font-size: 13px; font-weight: 800; letter-spacing: .05em; text-transform: uppercase; color: var(--muted); margin-bottom: 8px; }
+.feel-btns { display: grid; grid-template-columns: repeat(3, 1fr); gap: 8px; }
+.feel-btn { flex-direction: column; gap: 2px; min-height: 62px; padding: 6px 4px; background: var(--card2); border: 2px solid transparent; font-size: 13px; }
+.feel-btn .i { width: 30px; height: 30px; stroke-width: 1.9; }
+.feel-btn small { font-size: 12px; font-weight: 700; }
+.feel-btn.f-good { color: var(--up); } .feel-btn.f-ok { color: var(--same); } .feel-btn.f-bad { color: var(--bad); }
+.feel-btn.on.f-good { background: rgba(57,255,20,.16); border-color: var(--up); box-shadow: 0 0 12px rgba(57,255,20,.35); }
+.feel-btn.on.f-ok { background: rgba(250,204,21,.14); border-color: var(--same); }
+.feel-btn.on.f-bad { background: rgba(255,77,77,.14); border-color: var(--bad); }
+.feel-btns:has(.on) .feel-btn:not(.on) { opacity: .45; }
+.ss-feel .feel-ss-row { padding: 6px 0; border-top: 1px solid var(--line); }
+.ss-feel .feel-ss-row:first-of-type { border-top: 0; padding-top: 0; }
+.ss-feel .feel-ss-row b { display: block; font-size: 15px; margin-bottom: 6px; }
+.feel-chip { display: inline-flex; align-items: center; gap: 3px; font-size: 12px; font-weight: 700; padding: 1px 7px 1px 3px; border-radius: 99px; vertical-align: middle; white-space: nowrap; }
+.feel-chip .i { width: 15px; height: 15px; }
+.feel-chip.f-good { color: var(--up); background: rgba(57,255,20,.1); } .feel-chip.f-ok { color: var(--same); background: rgba(250,204,21,.1); } .feel-chip.f-bad { color: var(--bad); background: rgba(255,77,77,.12); }
+.day-tough { display: flex; gap: 10px; align-items: flex-start; border: 1px solid rgba(255,77,77,.4); }
+.day-tough > .i { width: 26px; height: 26px; color: var(--bad); flex: none; }
+.day-tough span { display: flex; flex-direction: column; } .day-tough small { color: var(--muted); font-size: 14px; }
+.cc-ready { display: grid; gap: 10px; }
+.cc-ready a { display: flex; gap: 10px; align-items: center; color: var(--text); text-decoration: none; }
+.cc-ready .i { width: 28px; height: 28px; color: var(--up); flex: none; }
+.cc-ready span { display: flex; flex-direction: column; } .cc-ready small { color: var(--muted); font-size: 13px; }
+.coach-card.s-bad { border-left-color: var(--bad); }
+.coach-card.s-bad .st { color: #3a0000; background: var(--bad); }

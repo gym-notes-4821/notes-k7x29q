@@ -81,7 +81,14 @@ const STORE = 'trainingsapp.v1';
   await card('Latziehen').locator('[data-act=take-all]').click();
   ok(await row('Latziehen', 2).locator('input[data-f=r]').inputValue() === '10', '3 „Wie letztes Mal“ befüllt alle Sätze');
   await row('Latziehen', 2).locator('input[data-f=r]').fill('12');
+  ok(await card('Squats').locator('.feel').count() === 0, 'Smileys erst nach dem letzten Satz');
   await card('Squats').locator('[data-act=take-all]').click();
+  ok(await card('Squats').locator('.feel-btn').count() === 3, 'Smileys erscheinen nach dem letzten Satz');
+  await card('Squats').locator('.feel-btn.f-good').click();
+  ok(await card('Squats').locator('.feel-btn.f-good.on').count() === 1, 'Smiley „gut“ ausgewählt');
+  await card('Squats').locator('.feel-btn.f-good').click();
+  ok(await card('Squats').locator('.feel-btn.on').count() === 0, 'Nochmal tippen hebt die Auswahl auf');
+  await card('Squats').locator('.feel-btn.f-ok').click();
   await card('Rudern sitzend').locator('[data-act=take-all]').click();
   await row('Rudern sitzend', 1).locator('input[data-f=r]').fill('11');
   await row('Schulterdrücken', 0).locator('input[data-f=w]').fill('10'); await row('Schulterdrücken', 0).locator('input[data-f=r]').fill('10');
@@ -113,6 +120,9 @@ const STORE = 'trainingsapp.v1';
   ok(await ssB.locator('input[data-f=w]').first().inputValue() === '12,5', '10 „Wie letztes Mal“ befüllt ganzen Supersatz (12,5)');
   await ssB.locator('input[data-f=r]').nth(3).fill('13'); // Hammercurls R2: 13 statt 12 (R1: Hammer, Turm 2, Crunches)
   await shot(page, '2-supersatz-vor-reload');
+  // Supersatz: Smileys pro Übung erst nach der letzten Runde
+  ok(await ssB.locator('.feel-ss-row').count() === 2, 'Supersatz B: Smileys für die zwei fertigen Übungen');
+  await ssB.locator('.feel-ss-row', { hasText: 'Hammercurls' }).locator('.feel-btn.f-good').click();
   // 4. Neu laden
   await page.reload(); await page.waitForSelector('.ex-card');
   ok(await row('Kreuzheben', 0).locator('input[data-f=w]').inputValue() === '42,5', '4 Nach Neuladen: 42,5 noch da');
@@ -147,6 +157,7 @@ const STORE = 'trainingsapp.v1';
   ok(await cls('Seitheben') === 's-grey', '11 Seitheben grau');
   ok(await cls('Bizepscurls') === 's-up' && await cls('Trizeps am Turm 1') === 's-same', '10/11 Bizepscurls und Turm 1 einzeln bewertet');
   ok((await page.locator('.sub').allInnerTexts()).join('|').toUpperCase() === 'SUPERSATZ A|SUPERSATZ B', '10 Zwischenüberschriften Supersatz A/B');
+  ok((await prow('Squats').locator('.feel-chip').innerText()).includes('okay') && (await prow('Hammercurls').locator('.feel-chip').innerText()).includes('gut'), 'Auswertung zeigt das Gefühl je Übung');
   ok(await page.locator('.summary').count() === 1 && /\d/.test(await page.locator('.summary').innerText()), 'Auswertung: Zusammenfassung mit Dauer, Sätzen, Gewicht');
   { const t = await page.locator('.pr-box').innerText();
     ok(t.includes('Meiste Wdh. bei 12 kg: 14 (vorher 13)') && t.includes('Höchstes Gewicht: 10 kg × 10 (vorher 7,5 kg)') && !t.includes('Latziehen'), 'Auswertung: Rekorde Bizepscurls und Schulterdrücken, kein Schein-Rekord'); }

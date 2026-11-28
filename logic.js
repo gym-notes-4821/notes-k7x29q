@@ -751,7 +751,35 @@ function alternativesFor(name) {
   return hit ? hit[1].filter(([alt]) => normKey(alt) !== n).map(([alt, why, pd]) => ({ name: alt, why, perDumbbell: !!pd })) : [];
 }
 /** Tipps, bevor man eine Übung tauscht. */
-function coachTips(state) {
+/* ---- Gefühl je Übung (gut, okay, schlecht) ---- */
+const FEELS = ['good', 'ok', 'bad'];
+/** Bewertungen der letzten n Trainings einer Übung (neueste zuletzt; ohne Bewertung = null). */
+function recentFeels(key, n = 3) { return exerciseHistory(key).slice(-n).map(e => e.ex.feel || null); }
+/**
+ * Auswertung des Gefühls:
+ *  ready – zweimal in Folge „gut“: Zeit für mehr Gewicht (bzw. mehr Wiederholungen, wenn noch unter 10)
+ *  bad   – mindestens 2 der letzten 3 Trainings „schlecht“
+ */
+function feelHint(key) {
+  const h = exerciseHistory(key), f = h.slice(-3).map(e => e.ex.feel || null);
+  if (f.filter(x => x === 'bad').length >= 2) return { type: 'bad', feels: f };
+  const last2 = h.slice(-2);
+  if (last2.length === 2 && last2.every(e => e.ex.feel === 'good')) {
+    const minR = Math.min(...last2[1].sets.map(x => x.r));
+    return { type: 'ready', feels: f, more: minR >= 10 ? 'weight' : 'reps' };
+  }
+  return null;
+}
+/** Tagesform: viele „schlecht“-Bewertungen in einem Training deuten eher auf Schlaf/Stress als auf die Übungen. */
+function dayFeel(session) {
+  const rated = session.exercises.filter(e => !e.skipped && e.feel);
+  const bad = rated.filter(e => e.feel === 'bad').length;
+  return { rated: rated.length, bad, tough: rated.length >= 3 && bad / rated.length >= 0.5 };
+}
+function coachTips(state, feel) {
+  if (state === 'stagnant' && feel === 'good')
+    return ['Fühlt sich gut an – der Reiz ist vermutlich zu sanft: eine Gewichtsstufe höher', 'Die letzten Wiederholungen bewusst bis kurz vor Muskelversagen ausreizen', 'Wenn es trotzdem hängt: eine Alternative unten ausprobieren'];
+  if (state === 'stagnant' && feel === 'bad') state = 'down'; // fühlt sich schlecht an: zuerst Erholung
   return state === 'down'
     ? ['Erholung prüfen: Schlaf, Essen und genug Pause zwischen den Trainings', 'Eine leichtere Woche einlegen (ca. 10 % weniger Gewicht), dann wieder steigern', 'Pausen zwischen den Sätzen verlängern (2–3 Minuten bei Grundübungen)']
     : ['Gewicht eine Stufe runter und die Wiederholungen bis 15 hochziehen', 'Pause zwischen den Sätzen verlängern', 'Technik prüfen: langsam ablassen, voller Bewegungsweg'];
@@ -801,8 +829,12 @@ function estimateMinutes(plan) {
 /** Gesamtbewertung für den Coach. */
 function coachReport(plan, refISO = todayISO()) {
   const exercises = plan.exercises.map(e => {
-    const key = normKey(e.name), st = exerciseState(key);
-    return { name: e.name, id: e.id, key, ...st, alternatives: ['stagnant', 'down'].includes(st.state) ? alternativesFor(e.name) : [], tips: ['stagnant', 'down'].includes(st.state) ? coachTips(st.state) : [] };
+    const key = normKey(e.name), st = exerciseState(key), fh = feelHint(key);
+    const f = recentFeels(key).filter(Boolean), nb = f.filter(x => x === 'bad').length, ng = f.filter(x => x === 'good').length;
+    const feelTrend = nb > ng ? 'bad' : ng > nb ? 'good' : null;
+    const issue = ['stagnant', 'down'].includes(st.state) || (!!fh && fh.type === 'bad');
+    return { name: e.name, id: e.id, key, ...st, feel: fh, feelTrend, issue,
+      alternatives: issue ? alternativesFor(e.name) : [], tips: issue ? coachTips(['stagnant', 'down'].includes(st.state) ? st.state : 'down', feelTrend) : [] };
   });
   // Drücken/Ziehen nach Hauptmuskeln
   let push = 0, pull = 0;
@@ -818,7 +850,9 @@ function coachReport(plan, refISO = todayISO()) {
   const goal = (db.settings && db.settings.weeklyGoal) || 3;
   const count = st => exercises.filter(x => x.state === st).length;
   return { exercises, push, pull, weak, minutes: estimateMinutes(plan), weeks, goal,
-    counts: { up: count('up'), ok: count('ok'), stagnant: count('stagnant'), down: count('down'), few: count('few') } };
+    counts: { up: count('up'), ok: count('ok'), stagnant: count('stagnant'), down: count('down'), few: count('few'),
+      issues: exercises.filter(x => x.issue).length, feelBad: exercises.filter(x => x.feel && x.feel.type === 'bad').length,
+      ready: exercises.filter(x => x.feel && x.feel.type === 'ready').length } };
 }
 /** Übung im Plan durch eine Alternative ersetzen (Sätze, Supersatz und Platz bleiben; neuer Name = neuer Verlauf). */
 function swapExercise(plan, exId, newName) {
@@ -925,6 +959,7 @@ const api = {
   forecastFor, forecastText, planForecast, blocks, normalizeGroups, MAX_WEEKLY, TAU_WEEKS, effWeeks, isWorkSet,
   recordsFor, sessionStats, shortDelta, weekCount, noteFor, setNote,
   ALTERNATIVES, alternativesFor, exerciseState, coachReport, estimateMinutes, swapExercise, coachTips,
+  FEELS, recentFeels, feelHint, dayFeel,
   maxCategory, maxRestBefore, MAX_REPS, currentE1, maxTestPlan, maxTestState, newMaxTest, maxTestHistory, maxTestDue, MUSCLES, musclesOf, planMuscleLoad, muscleLevel, prefillWeights, isUntouched,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;

@@ -366,6 +366,29 @@ test('Maximalkraft: Reihenfolge wie im Training, Startgewicht, Aufwärmen, näch
   assert.strictEqual(L.maxTestHistory('latziehen').length, 1);
   assert.strictEqual(L.currentE1('latziehen').e1, 65, 'Test ist jünger als das letzte Training');
 });
+test('Gefühl: 2× „gut“ = bereit für mehr, 2 von 3 „schlecht“ = Hinweis, Tagesform', () => {
+  const db = L.freshDb(); L.setDb(db);
+  db.sessions[0].date = L.addDaysISO(today, -12);
+  const d = k => L.addDaysISO(today, -12 + k * 3);
+  const a = addTraining(db, d(1), { 'Latziehen': [[45, 12], [45, 12], [45, 11]], 'Squats': [[10, 12], [10, 12], [10, 9]] });
+  const b = addTraining(db, d(2), { 'Latziehen': [[45, 12], [45, 12], [45, 12]], 'Squats': [[10, 12], [10, 12], [10, 9]] });
+  exOf(a, 'Latziehen').feel = 'good'; exOf(b, 'Latziehen').feel = 'good';
+  exOf(a, 'Squats').feel = 'bad'; exOf(b, 'Squats').feel = 'bad';
+  assert.deepStrictEqual(L.feelHint('latziehen'), { type: 'ready', feels: [null, 'good', 'good'], more: 'weight' });
+  assert.strictEqual(L.feelHint('squats').type, 'bad');
+  const r = L.coachReport(db.plans[0]);
+  const ex = n => r.exercises.find(e => e.name === n);
+  assert.ok(ex('Squats').issue && ex('Squats').alternatives.length >= 2, 'schlechtes Gefühl → Hinweis mit Alternativen, auch ohne Stagnation');
+  assert.ok(ex('Squats').tips[0].startsWith('Erholung'), 'bei schlechtem Gefühl zuerst Erholung');
+  assert.ok(!ex('Latziehen').issue); assert.strictEqual(r.counts.ready, 1); assert.strictEqual(r.counts.feelBad, 1);
+  // Tagesform: ≥ 3 bewertet, mindestens die Hälfte „schlecht“
+  const c = addTraining(db, d(3), { 'Latziehen': [[45, 11]], 'Squats': [[10, 10]], 'Kreuzheben': [[42.5, 10]] });
+  ['Latziehen', 'Squats'].forEach(n => { exOf(c, n).feel = 'bad'; }); exOf(c, 'Kreuzheben').feel = 'ok';
+  assert.deepStrictEqual(L.dayFeel(c), { rated: 3, bad: 2, tough: true });
+  // Stagnation + gutes Gefühl → mehr Reiz statt Erholung
+  assert.ok(L.coachTips('stagnant', 'good')[0].includes('Gewichtsstufe höher'));
+  assert.ok(L.coachTips('stagnant', 'bad')[0].startsWith('Erholung'));
+});
 const v1 = require('./v1-sample.json'); // Daten im alten Format (Version 1)
 test('Migration: Version 1 lädt ohne Fehler, Trainings bleiben erhalten', () => {
   const d = L.migrate(v1); L.setDb(d);

@@ -53,7 +53,7 @@ const e1rm = s => s.w * (1 + s.r / 30);
 const START_PLAN_ID = 'plan-ganzkoerper-v2';
 // [Name, Gewicht (bei Kurzhanteln pro Hantel), Wiederholungen je Satz (Startwerte), Supersatz, pro Hantel, Sätze im Plan]
 const START_VALUES = [
-  ['Hackenschmidt', 10, [12, 12, 8], null, false],
+  ['Squats', 10, [12, 12, 8], null, false],
   ['Kreuzheben', 42.5, [12, 10], null, false, 3],
   ['Bankdrücken mit Kurzhanteln', 17.5, [12, 12, 8], null, true],
   ['Latziehen', 45, [12, 12, 10], null, false],
@@ -96,7 +96,7 @@ function freshDb() {
 
 /* ---------------- Migration ---------------- */
 const validDb = d => !!d && Array.isArray(d.plans) && Array.isArray(d.sessions);
-const DATA_VERSION = 3;
+const DATA_VERSION = 4;
 /** Bringt Daten beliebiger älterer Version auf die aktuelle Version. Selbst eingetragene Trainings bleiben unverändert. */
 function migrate(input) {
   if (!validDb(input)) throw new Error('Ungültiges Datenformat');
@@ -158,6 +158,23 @@ function migrate(input) {
     }
     d.version = 3;
   }
+  if (d.version < 4) {
+    // Version 4: Hackenschmidt wird im Standardplan durch Squats ersetzt; der Verlauf läuft weiter.
+    // Gespeicherte Trainings behalten ihren Namen, die Zuordnung steht in d.renames.
+    d.renames = d.renames || {};
+    const plan = d.plans.find(p => p.id === START_PLAN_ID);
+    const e = plan && plan.exercises.find(x => normKey(x.name) === 'hackenschmidt');
+    if (e) {
+      e.name = 'Squats';
+      d.renames['hackenschmidt'] = 'squats';
+      for (const s of d.sessions) {
+        if (s.status !== 'active' || s.planId !== START_PLAN_ID) continue;
+        for (const ex of s.exercises)
+          if (ex.key === 'hackenschmidt' && !ex.skipped && ex.sets.every(x => x.r == null)) { ex.name = 'Squats'; ex.key = 'squats'; }
+      }
+    }
+    d.version = 4;
+  }
   if (!d.plans.some(p => p.id === d.activePlanId)) d.activePlanId = d.plans[0] ? d.plans[0].id : null;
   return d;
 }
@@ -166,6 +183,25 @@ function migrate(input) {
 let db = null;
 const setDb = d => { db = d; };
 const getDb = () => db;
+/**
+ * Umbenennungen (alter Schlüssel → neuer Schlüssel): Gespeicherte Trainings behalten ihren Namen,
+ * beim Auswerten zählen alte und neue Namen als dieselbe Übung, damit der Verlauf weiterläuft.
+ */
+function canon(key) {
+  const r = (db && db.renames) || {}, seen = new Set();
+  let k = key;
+  while (r[k] && !seen.has(k)) { seen.add(k); k = r[k]; }
+  return k;
+}
+const sameEx = (a, b) => canon(a) === canon(b);
+/** Verlauf einer Übung unter neuem Namen weiterführen. */
+function renameExercise(oldName, newName) {
+  const o = normKey(oldName), n = normKey(newName);
+  if (!o || !n || o === n) return;
+  db.renames = db.renames || {};
+  delete db.renames[n]; // der neue Name ist (wieder) der aktuelle
+  db.renames[o] = n;
+}
 const sessionOrder = (a, b) => a.date < b.date ? -1 : a.date > b.date ? 1 : (a.createdAt - b.createdAt);
 const doneSessions = () => db.sessions.filter(s => s.status === 'done').sort(sessionOrder);
 const isValidSet = s => s.w != null && s.r != null && s.r > 0 && !Number.isNaN(s.w);
@@ -178,7 +214,7 @@ function exerciseHistory(key) {
   const out = [];
   for (const s of doneSessions())
     for (const ex of s.exercises)
-      if (ex.key === key) { const sets = validSets(ex); if (sets.length) out.push({ session: s, ex, sets }); }
+      if (sameEx(ex.key, key)) { const sets = validSets(ex); if (sets.length) out.push({ session: s, ex, sets }); }
   return out;
 }
 function previousEntry(key, session) {
@@ -291,10 +327,10 @@ function analyzeExercise(session, ex) {
 }
 /** Bewertung einer Übung im Fortschritt: letztes Training mit dieser Übung gegenüber dem vorherigen. */
 function latestProgress(key) {
-  const all = doneSessions().filter(s => s.exercises.some(e => e.key === key));
+  const all = doneSessions().filter(s => s.exercises.some(e => sameEx(e.key, key)));
   if (!all.length) return { status: 'none', text: 'Noch keine Werte.' };
   const s = all[all.length - 1];
-  const a = analyzeExercise(s, s.exercises.find(e => e.key === key));
+  const a = analyzeExercise(s, s.exercises.find(e => sameEx(e.key, key)));
   a.session = s;
   if (a.status === 'skipped') a.text = `Zuletzt übersprungen (${fmtDate(s.date)}) – zählt nicht als schwächer.`;
   return a;
@@ -303,7 +339,7 @@ function latestProgress(key) {
 /* ---------------- Kraftentwicklung des Plans ---------------- */
 /** Durchschnittliche Veränderung des geschätzten 1RM aller Planübungen gegenüber den Startwerten (bzw. dem ersten Wert). */
 function planProgress(plan) {
-  const keys = new Set(plan.exercises.map(e => normKey(e.name)));
+  const keys = new Set(plan.exercises.map(e => canon(normKey(e.name))));
   const all = doneSessions();
   const base = all.find(s => s.kind === 'baseline' && s.planId === plan.id);
   const ref = {}, cur = {}, points = [];
@@ -311,12 +347,13 @@ function planProgress(plan) {
     if (base && sessionOrder(s, base) < 0) continue;
     let touched = false;
     for (const ex of s.exercises) {
-      if (!keys.has(ex.key)) continue;
+      const k = canon(ex.key);
+      if (!keys.has(k)) continue;
       const vs = validSets(ex);
       if (!vs.length) continue;
       const v = bestE1(vs);
-      if (ref[ex.key] == null) ref[ex.key] = v;
-      cur[ex.key] = v; touched = true;
+      if (ref[k] == null) ref[k] = v;
+      cur[k] = v; touched = true;
     }
     if (touched) {
       const ks = Object.keys(cur);
@@ -357,7 +394,7 @@ function forecastText(name, f, days) {
 }
 function planForecast(plan, days) {
   const prog = planProgress(plan);
-  const per = plan.exercises.map(e => ({ e, key: normKey(e.name), f: forecastFor(normKey(e.name), days, e.perDumbbell) }));
+  const per = plan.exercises.map(e => ({ e, key: canon(normKey(e.name)), f: forecastFor(normKey(e.name), days, e.perDumbbell) }));
   const withF = per.filter(x => x.f.status !== 'few');
   const pct = withF.length ? withF.reduce((a, x) => a + x.f.pct, 0) / withF.length : null;
   // Endwert der gestrichelten Linie: Veränderung gegenüber Startwerten nach Ablauf des Zeitraums
@@ -406,7 +443,7 @@ function normalizeGroups(plan) {
 const api = {
   uid, normKey, round2, round1, pad, todayISO, dayNum, addDaysISO, parseNum, parseInt0, fmtNum, fmtSet, fmtSets, fmtPct, fmtDate, repWord, e1rm,
   START_PLAN_ID, START_VALUES, DATA_VERSION, mkPlanEx, defaultPlan, snapshotEx, newSession, baselineSession, freshDb, validDb, migrate,
-  setDb, getDb, sessionOrder, doneSessions, isValidSet, validSets, bestE1, bestSetByE1, exerciseHistory, previousEntry,
+  setDb, getDb, canon, sameEx, renameExercise, sessionOrder, doneSessions, isValidSet, validSets, bestE1, bestSetByE1, exerciseHistory, previousEntry,
   rankSets, cmpPair, compareSets, diffText, explain, trendFor, analyzeExercise, latestProgress, planProgress,
   forecastFor, forecastText, planForecast, blocks, normalizeGroups, MAX_WEEKLY, prefillWeights, isUntouched,
 };

@@ -27,7 +27,7 @@ const exOf = (s, name) => s.exercises.find(e => e.name === name);
 test('Standardplan: 12 Übungen in richtiger Reihenfolge, Supersätze A/B', () => {
   const db = L.freshDb(); L.setDb(db);
   const p = db.plans[0];
-  assert.deepStrictEqual(p.exercises.map(e => e.name), ['Hackenschmidt', 'Kreuzheben', 'Bankdrücken mit Kurzhanteln', 'Latziehen',
+  assert.deepStrictEqual(p.exercises.map(e => e.name), ['Squats', 'Kreuzheben', 'Bankdrücken mit Kurzhanteln', 'Latziehen',
     'Butterfly mit Kurzhanteln', 'Rudern aufrecht', 'Schulterdrücken', 'Bizepscurls', 'Trizeps am Turm 1', 'Seitheben', 'Hammercurls', 'Trizeps am Turm 2']);
   assert.deepStrictEqual(p.exercises.map(e => e.group || '-').join(''), '-------AAABB');
   assert.deepStrictEqual(p.exercises.map(e => e.sets), [3, 3, 3, 3, 3, 3, 3, 2, 2, 2, 2, 2]);
@@ -58,7 +58,7 @@ test('Dezimaleingaben 12,5 / 42,5 / 12.5 werden gelesen, Unsinn abgelehnt', () =
 const db1 = L.freshDb(); L.setDb(db1);
 const s1 = addTraining(db1, today, {
   'Latziehen': [[45, 12], [45, 12], [45, 12]],            // grün
-  'Hackenschmidt': [[10, 12], [10, 12], [10, 8]],         // gelb
+  'Squats': [[10, 12], [10, 12], [10, 8]],         // gelb
   'Rudern aufrecht': [[20, 12], [20, 11], [20, 12]],      // orange
   'Kreuzheben': [[45, 10], [42.5, 10]],                   // gegensätzlich, 1RM +0,8 % => gelb
   'Schulterdrücken': [[10, 10], [7.5, 12], [7.5, 10]],    // gegensätzlich, 1RM +27 % => grün
@@ -77,7 +77,7 @@ test('Grün: mehr Wiederholungen bei gleichem Gewicht', () => {
   assert.strictEqual(a.status, 'up');
   assert.ok(a.text.includes('45 kg × 12 statt 45 kg × 10 – zwei Wiederholungen mehr bei gleichem Gewicht'), a.text);
 });
-test('Gelb: alles gleich', () => { assert.strictEqual(A('Hackenschmidt').status, 'same'); });
+test('Gelb: alles gleich', () => { assert.strictEqual(A('Squats').status, 'same'); });
 test('Orange: weniger Wiederholungen bei gleichem Gewicht', () => {
   const a = A('Rudern aufrecht'); assert.strictEqual(a.status, 'down'); assert.ok(a.text.includes('eine Wiederholung weniger'), a.text);
 });
@@ -234,7 +234,7 @@ test('Migration Version 2 → 3: Kurzhanteln pro Hantel, Kreuzheben 3 Sätze, ec
   act.prefill = JSON.stringify(act.exercises.map(e => e.sets.map(x => x.w)));
   old.sessions.push(act);
   const d = L.migrate(old); L.setDb(d);
-  assert.strictEqual(d.version, 3);
+  assert.ok(d.version >= 3);
   const p = d.plans[0];
   assert.deepStrictEqual(p.exercises.map(e => e.name === 'Kreuzheben' ? e.sets : e.guide).slice(1, 7), [3, 17.5, 45, 12.5, 20, 7.5]);
   const base = d.sessions.find(s => s.kind === 'baseline');
@@ -252,6 +252,48 @@ test('Migration Version 2 → 3: Kurzhanteln pro Hantel, Kreuzheben 3 Sätze, ec
   assert.deepStrictEqual(exOf(n, 'Kreuzheben').sets.length, 3);
   assert.deepStrictEqual(exOf(n, 'Bankdrücken mit Kurzhanteln').sets.map(x => x.w), [35, 35, 35], 'echtes Training (35) ist das letzte Mal');
   assert.strictEqual(L.migrate(d).plans[0].exercises.find(e => e.name === 'Schulterdrücken').guide, 7.5, 'nicht doppelt halbiert');
+});
+test('Migration Version 3 → 4: Hackenschmidt wird Squats, Verlauf läuft weiter, Trainings unverändert', () => {
+  // Stand vor dem Update nachbauen: Plan und Trainings mit „Hackenschmidt“
+  const old = L.freshDb(); old.version = 3; L.setDb(old);
+  const plan = old.plans[0];
+  plan.exercises[0].name = 'Hackenschmidt';
+  const rn = s => { const ex = s.exercises[0]; ex.name = 'Hackenschmidt'; ex.key = 'hackenschmidt'; };
+  rn(old.sessions[0]);
+  const real = addTraining(old, today, { 'Hackenschmidt': [[12.5, 12], [12.5, 11], [12.5, 9]] });
+  const act = L.newSession(plan, today); act.createdAt = Date.now() + 9000; rn(act); old.sessions.push(act);
+  const d = L.migrate(old); L.setDb(d);
+  assert.strictEqual(d.version, 4);
+  assert.strictEqual(d.plans[0].exercises[0].name, 'Squats');
+  assert.deepStrictEqual(d.renames, { hackenschmidt: 'squats' });
+  // gespeicherte Trainings behalten den alten Namen …
+  assert.strictEqual(exOf(d.sessions.find(s => s.id === real.id), 'Hackenschmidt').sets[0].w, 12.5);
+  assert.strictEqual(d.sessions.find(s => s.kind === 'baseline').exercises[0].name, 'Hackenschmidt');
+  // … das offene, noch leere Training wird zu Squats
+  assert.strictEqual(d.sessions.find(s => s.id === act.id).exercises[0].name, 'Squats');
+  // Verlauf läuft unter Squats weiter
+  assert.strictEqual(L.exerciseHistory('squats').length, 2);
+  const n0 = L.newSession(d.plans[0], today); n0.createdAt = Date.now() + 20000;
+  const n = L.prefillWeights(n0);
+  assert.deepStrictEqual(exOf(n, 'Squats').sets.map(x => x.w), [12.5, 12.5, 12.5], 'kg vom letzten Hackenschmidt-Training');
+  const prev = L.previousEntry('squats', n);
+  assert.strictEqual(prev.ex.name, 'Hackenschmidt');
+  exOf(n, 'Squats').sets = sets([[12.5, 12], [12.5, 12], [12.5, 9]]); n.status = 'done'; d.sessions.push(n);
+  const a = L.analyzeExercise(n, exOf(n, 'Squats'));
+  assert.strictEqual(a.status, 'up'); assert.ok(a.text.includes('12,5 kg × 12 statt 12,5 kg × 11'), a.text);
+  assert.strictEqual(L.latestProgress('squats').status, 'up');
+  assert.ok(L.planProgress(d.plans[0]).points.length >= 2);
+  assert.strictEqual(L.migrate(d).plans[0].exercises[0].name, 'Squats', 'wiederholbar');
+});
+test('Umbenennen mit weiterlaufendem Verlauf, auch hin und zurück', () => {
+  const db = L.freshDb(); L.setDb(db);
+  addTraining(db, today, { 'Latziehen': [[45, 12]] });
+  L.renameExercise('Latziehen', 'Latzug');
+  assert.strictEqual(L.exerciseHistory('latzug').length, 2);
+  assert.strictEqual(L.canon('latziehen'), 'latzug');
+  L.renameExercise('Latzug', 'Latziehen');            // zurück: keine Endlosschleife
+  assert.strictEqual(L.canon('latzug'), 'latziehen');
+  assert.strictEqual(L.exerciseHistory('latziehen').length, 2);
 });
 test('Migration ist wiederholbar (keine doppelten Startwerte)', () => {
   const d = L.migrate(L.migrate(v1));

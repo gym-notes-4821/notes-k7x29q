@@ -214,7 +214,7 @@ function viewTrainingEntry() {
 }
 function lastLine(s, ex) {
   const prev = previousEntry(ex.key, s);
-  if (prev) return `<p class="last">Letztes Mal (${prev.session.kind === 'baseline' ? 'Startwerte, ' : ''}${fmtDate(prev.session.date, 'tiny')}): <b>${fmtSets(prev.sets)}</b></p>`;
+  if (prev) return `<p class="last">Letztes Mal${prev.ex.name !== ex.name ? ` als ${esc(prev.ex.name)}` : ''} (${prev.session.kind === 'baseline' ? 'Startwerte, ' : ''}${fmtDate(prev.session.date, 'tiny')}): <b>${fmtSets(prev.sets)}</b></p>`;
   if (ex.guide != null) return `<p class="last">Noch kein Eintrag · Orientierung <b>${fmtNum(ex.guide)} kg</b></p>`;
   return '<p class="last">Noch kein Eintrag</p>';
 }
@@ -317,10 +317,10 @@ function viewTrainings() {
 
 /* ---------------- Fortschritt ---------------- */
 function otherExercises(plan) {
-  const inPlan = new Set(plan.exercises.map(e => normKey(e.name)));
+  const inPlan = new Set(plan.exercises.map(e => L.canon(normKey(e.name))));
   const map = new Map();
   for (const s of doneSessions()) for (const ex of s.exercises)
-    if (!inPlan.has(ex.key) && validSets(ex).length) map.set(ex.key, ex.name);
+    if (!inPlan.has(L.canon(ex.key)) && validSets(ex).length) map.set(L.canon(ex.key), ex.name);
   return [...map.entries()];
 }
 function viewProgress() {
@@ -379,9 +379,9 @@ const chartMode = {};
 function viewExercise(key, outlook) {
   const back = outlook ? '#/ausblick' : '#/fortschritt';
   const hist = exerciseHistory(key);
-  const all = doneSessions().map(s => ({ s, ex: s.exercises.find(e => e.key === key) })).filter(x => x.ex);
-  const name = all.length ? all[all.length - 1].ex.name : key;
-  const planEx = (activePlan()?.exercises || []).find(e => normKey(e.name) === key);
+  const all = doneSessions().map(s => ({ s, ex: s.exercises.find(e => L.sameEx(e.key, key)) })).filter(x => x.ex);
+  const planEx = (activePlan()?.exercises || []).find(e => L.sameEx(normKey(e.name), key));
+  const name = planEx ? planEx.name : all.length ? all[all.length - 1].ex.name : key;
   const perDumbbell = planEx ? planEx.perDumbbell : (all.length && all[all.length - 1].ex.perDumbbell);
   let h = topbar(name, back, true);
   if (perDumbbell) h += '<p class="muted small">Gewichte pro Hantel</p>';
@@ -414,7 +414,7 @@ function viewExercise(key, outlook) {
   for (let i = all.length - 1; i >= 0; i--) {
     const { s, ex } = all[i];
     const a = analyzeExercise(s, ex);
-    h += `<tr><td><a href="#/ergebnis/${s.id}">${fmtDate(s.date)}</a>${s.kind === 'baseline' ? '<br><span class="tag">Startwerte</span>' : ''}</td>
+    h += `<tr><td><a href="#/ergebnis/${s.id}">${fmtDate(s.date)}</a>${s.kind === 'baseline' ? '<br><span class="tag">Startwerte</span>' : ''}${ex.name !== name ? `<br><span class="muted small">als ${esc(ex.name)}</span>` : ''}</td>
       <td>${ex.skipped ? '<span class="muted">übersprungen</span>' : validSets(ex).map(x => `${fmtNum(x.w)} × ${x.r}`).join('<br>')}</td>
       <td><span class="st-mini s-${CLS[a.status]}">${icon(STATUS[a.status].icon)}${STATUS[a.status].label}</span></td></tr>`;
   }
@@ -482,7 +482,7 @@ function viewSlotEdit(pid, eid) {
     <label class="field" style="margin-top:8px"><span>Supersatz</span><select data-slot="group">
       <option value="">Kein Supersatz (Einzelübung)</option>
       ${groups.map(g => `<option value="${esc(g)}" ${e.group === g ? 'selected' : ''}>Supersatz ${esc(g)}</option>`).join('')}</select></label>
-    <p class="muted small">Der Verlauf hängt am Namen der Übung. Ein neuer Name beginnt einen neuen Verlauf.</p>
+    <p class="muted small">Beim Umbenennen fragt die App, ob der bisherige Verlauf unter dem neuen Namen weiterläuft.</p>
     <div class="stack"><a class="btn btn-primary btn-block" href="#/plan/${p.id}">Fertig</a>
     <button class="btn-danger btn-block" data-act="del-ex">Übung aus Plan entfernen</button></div>`;
 }
@@ -557,6 +557,16 @@ $app.addEventListener('change', ev => {
   }
   if (t.dataset.act === 'import') { importFile(t.files[0]); t.value = ''; return; }
   const p = currentPlan(); if (!p) return;
+  if (t.dataset.slot === 'name') {
+    // Umbenennen: bisherigen Verlauf weiterführen oder neu beginnen?
+    const e = currentSlot(p), oldName = t.dataset.before || '', newName = e.name;
+    t.dataset.before = newName;
+    if (oldName && normKey(oldName) !== normKey(newName) && exerciseHistory(normKey(oldName)).length &&
+        confirm(`Bisherigen Verlauf von „${oldName}“ unter „${newName}“ weiterführen?\n\nOK: Ja – „Letztes Mal“, Vergleich und Fortschritt laufen weiter (z. B. bei Tippfehler oder gleichwertiger Übung).\nAbbrechen: „${newName}“ beginnt mit einem eigenen, neuen Verlauf.`)) {
+      L.renameExercise(oldName, newName); save(); toast('Verlauf wird weitergeführt');
+    }
+    return;
+  }
   if (t.dataset.slot === 'perDumbbell') { currentSlot(p).perDumbbell = t.checked; save(); }
   if (t.dataset.slot === 'group') { const e = currentSlot(p); e.group = t.value || null; normalizeGroups(p); save(); toast(e.group ? `Zu Supersatz ${e.group} hinzugefügt` : 'Aus Supersatz entfernt'); rerenderKeepScroll(); }
 });
@@ -564,6 +574,7 @@ $app.addEventListener('change', ev => {
 // Gewicht beim Betreten des Feldes merken, damit eine Änderung an die Folgesätze weitergegeben werden kann
 $app.addEventListener('focusin', ev => {
   const t = ev.target;
+  if (t.dataset && t.dataset.slot === 'name' && t.dataset.before == null) t.dataset.before = t.value;
   if (t.dataset && t.dataset.f === 'w') { const s = currentSession(); const w = s && s.exercises[+t.dataset.ex].sets[+t.dataset.set].w; t.dataset.before = w ?? ''; }
 });
 

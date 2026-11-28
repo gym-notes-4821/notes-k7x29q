@@ -165,8 +165,15 @@ const STORE = 'trainingsapp.v1';
   ok(await page.locator('.checkin .bm-pick.sel[data-m="chest"]').count() === 1 && await page.locator('.ci-chips .chip.on', { hasText: 'Brust' }).count() === 1, 'Pump per Tipp auf die Körperansicht (vorne) – Liste zieht mit');
   await page.locator('.ci-chips .chip', { hasText: 'breiter Rücken' }).click();
   ok(await page.locator('.checkin .bm-pick.sel[data-m="lats"]').count() === 1, 'Pump per Liste – Körperansicht (hinten) zieht mit');
+  ok(await page.locator('.ci-pain-chips').count() === 0, 'Zwicken: Standard „Nein“');
+  await page.locator('.checkin [data-act=ci-painon][data-v=yes]').click();
+  await page.locator('.ci-pain-chips .chip', { hasText: 'Knie' }).click();
+  ok(await page.locator('.ci-pain-chips .chip.on').count() === 1, 'Zwicken: Knie gewählt');
+  await page.locator('.ci-ctx [data-k=sleep][data-v=bad]').click();
+  await page.locator('.ci-ctx [data-k=ate][data-v=yes]').click();
+  ok(await page.locator('.ci-ctx [data-k=time].on').count() === 1, 'Uhrzeit automatisch vorgewählt');
   await page.locator('.checkin [data-act=ci-done]').click();
-  { const t = await page.locator('.ci-mini').innerText(); ok(t.includes('gut') && t.includes('Brust') && t.includes('breiter Rücken'), 'Check-in gespeichert und kompakt angezeigt'); }
+  { const t = await page.locator('.ci-mini').innerText(); ok(t.includes('gut') && t.includes('Brust') && t.includes('breiter Rücken') && t.includes('Gezwickt: Knie') && t.includes('Schlaf schlecht') && t.includes('gegessen') && /morgens|mittags|abends/.test(t), 'Check-in gespeichert und kompakt angezeigt'); }
   ok(await page.locator('.summary').count() === 1 && /\d/.test(await page.locator('.summary').innerText()), 'Auswertung: Zusammenfassung mit Dauer, Sätzen, Gewicht');
   { const t = await page.locator('.pr-box').innerText();
     ok(t.includes('Meiste Wdh. bei 12 kg: 14 (vorher 13)') && t.includes('Höchstes Gewicht: 10 kg × 10 (vorher 7,5 kg)') && !t.includes('Latziehen'), 'Auswertung: Rekorde Bizepscurls und Schulterdrücken, kein Schein-Rekord'); }
@@ -182,6 +189,10 @@ const STORE = 'trainingsapp.v1';
 
   await go('#/coach'); await page.waitForSelector('.coach-hero');
   ok((await page.locator('.pump-card').innerText()).includes('Brust (1×)'), 'Coach: Pump-Karte nach dem ersten Check-in');
+  { const pc = page.locator('.coach-card.s-bad', { hasText: 'Knie' });
+    ok(await pc.count() === 1 && (await pc.innerText()).includes('Squats') && await pc.locator('.cc-alt', { hasText: 'Squats → Beinpresse' }).count() === 1, 'Coach: Zwicken im Knie mit belasteter Übung und Alternative'); }
+  ok((await page.locator('.cc-patterns').innerText()).includes('Ab etwa 6 Check-ins'), 'Coach: Muster erst ab 6 Check-ins');
+  ok((await page.locator('.coach-hero').innerText()).includes('Achtung: Zwicken im Bereich Knie'), 'Coach: Zwicken steht in der Gesamtbewertung ganz oben');
   // Fortschritt
   await go('#/fortschritt');
   ok(await page.locator('.prow.compact').count() >= 14 && await page.locator('.prow.compact .spark').count() >= 14, 'Fortschritt: kompakte Zeilen mit Mini-Kurve');

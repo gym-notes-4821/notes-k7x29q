@@ -697,6 +697,78 @@ const PUMP_TIPS = {
 const pumpTip = id => PUMP_TIPS[id] || 'Etwas leichter und langsamer arbeiten, den Muskel bewusst anspannen.';
 const muscleName = id => (MUSCLES.find(([m]) => m === id) || [id, id])[1];
 
+/* ---- Check-in: Zwicken, Schlaf, Uhrzeit, Essen ---- */
+/** Gelenke/Bereiche für „Hat etwas gezwickt?“ und welche Übungen sie besonders belasten. */
+const PAIN_AREAS = [
+  ['shoulder', 'Schulter', /bankdrücken|bench|brustpresse|schulterdrücken|overhead|military|arnold|butterfly|fly|seitheben|dips|latziehen|klimmz/],
+  ['elbow', 'Ellbogen', /trizeps|push.?down|french|skull|curl|hammer|latziehen|klimmz|dips/],
+  ['wrist', 'Handgelenk', /curl|hammer|bankdrücken|bench|schulterdrücken|front/],
+  ['neck', 'Nacken', /kreuzheben|deadlift|schulterdrücken|seitheben|shrug|rudern aufrecht/],
+  ['lowback', 'unterer Rücken', /kreuzheben|deadlift|squat|kniebeuge|rudern|row|hyperextension/],
+  ['hip', 'Hüfte', /squat|kniebeuge|kreuzheben|deadlift|ausfallschritt|lunge|split|beinpresse/],
+  ['knee', 'Knie', /squat|kniebeuge|hackenschmidt|beinpresse|ausfallschritt|lunge|split|beinstrecker/],
+];
+const painName = id => (PAIN_AREAS.find(([a]) => a === id) || [id, id])[1];
+/** Übungen eines Plans, die einen Bereich besonders belasten. */
+function painExercises(plan, area) {
+  const hit = PAIN_AREAS.find(([a]) => a === area);
+  return hit ? plan.exercises.filter(e => hit[2].test(normKey(e.name))) : [];
+}
+/** Zwicken der letzten 6 Check-ins: je Bereich Anzahl und letztes Datum; „repeat“ ab 2× in den letzten 4. */
+function painReport(plan) {
+  const ci = recentCheckins(6), last4 = new Set(recentCheckins(4).map(s => s.id)), out = {};
+  for (const s of ci) for (const a of (s.checkin.pain || [])) {
+    const o = out[a] || (out[a] = { area: a, name: painName(a), n: 0, n4: 0, last: s.date });
+    o.n++; if (last4.has(s.id)) o.n4++; o.last = s.date;
+  }
+  return Object.values(out).map(o => ({ ...o, repeat: o.n4 >= 2, exercises: plan ? painExercises(plan, o.area).map(e => e.name) : [] }))
+    .sort((a, b) => (b.last > a.last) - (b.last < a.last) || b.n - a.n);
+}
+/** Uhrzeit aus der Startzeit: morgens bis 11 Uhr, mittags bis 16 Uhr, sonst abends. */
+function timeOfDay(ts) {
+  if (!ts) return null;
+  const h = new Date(ts).getHours();
+  return h < 11 ? 'morning' : h < 16 ? 'noon' : 'evening';
+}
+/** Leistung eines Trainings: Mittel der Ampeln aller verglichenen Übungen (stärker +1, gleich 0, schwächer −1). */
+function sessionScore(s) {
+  const st = s.exercises.map(ex => analyzeExercise(s, ex).status).filter(x => ['up', 'same', 'down'].includes(x));
+  if (!st.length) return null;
+  return st.reduce((a, x) => a + (x === 'up' ? 1 : x === 'down' ? -1 : 0), 0) / st.length;
+}
+/**
+ * Muster: vergleicht die Leistung nach Schlaf, Uhrzeit und Essen.
+ * Eine Aussage gibt es erst, wenn jede verglichene Gruppe mind. 2 Trainings hat und der Unterschied deutlich ist (≥ 0,3).
+ */
+const CONTEXT = {
+  sleep: { good: 'gutem Schlaf', ok: 'mittlerem Schlaf', bad: 'schlechtem Schlaf' },
+  time: { morning: 'morgens', noon: 'mittags', evening: 'abends' },
+  ate: { yes: 'mit Essen vorher', no: 'ohne Essen vorher' },
+};
+function contextPatterns(n = 20) {
+  const ci = recentCheckins(n).map(s => ({ s, sc: sessionScore(s) })).filter(x => x.sc != null);
+  const out = [];
+  for (const dim of ['sleep', 'time', 'ate']) {
+    const groups = {};
+    for (const { s, sc } of ci) {
+      let v = s.checkin[dim]; if (dim === 'ate' && v != null) v = v ? 'yes' : 'no';
+      if (!v) continue; (groups[v] = groups[v] || []).push(sc);
+    }
+    const avg = Object.entries(groups).filter(([, a]) => a.length >= 2).map(([k, a]) => [k, a.reduce((x, y) => x + y, 0) / a.length, a.length]);
+    if (avg.length < 2) continue;
+    avg.sort((a, b) => b[1] - a[1]);
+    const [best, worst] = [avg[0], avg[avg.length - 1]];
+    if (best[1] - worst[1] >= 0.3) out.push({ dim, best: best[0], worst: worst[0], diff: best[1] - worst[1], n: avg.reduce((a, x) => a + x[2], 0) });
+  }
+  return { checkins: ci.length, patterns: out };
+}
+function patternText(p) {
+  const L = CONTEXT[p.dim];
+  if (p.dim === 'sleep') return `Nach ${L[p.best]} trainierst du deutlich besser als nach ${L[p.worst]}.`;
+  if (p.dim === 'time') return `${L[p.best].charAt(0).toUpperCase() + L[p.best].slice(1)} bist du im Schnitt stärker als ${L[p.worst]}.`;
+  return p.best === 'yes' ? 'Mit Essen vorher schneidest du besser ab als ohne.' : 'Ohne Essen vorher schneidest du sogar besser ab als mit.';
+}
+
 /* ---------------- Maximalkraft (5RM-Test) ---------------- */
 /** Grundübungen, die sich für einen 5RM-Test eignen (Kategorie: 0 Kniebeuge, 1 Drücken, 2 Kreuzheben, 3 Latziehen, 4 Schulterdrücken, 5 Rudern). */
 const MAX_CATEGORIES = [
@@ -1016,6 +1088,7 @@ const api = {
   ALTERNATIVES, alternativesFor, exerciseState, coachReport, estimateMinutes, swapExercise, coachTips,
   FEELS, recentFeels, feelHint, dayFeel,
   musclesInSession, recentCheckins, pumpStats, checkinTrend, pumpTip, muscleName,
+  PAIN_AREAS, painName, painExercises, painReport, timeOfDay, sessionScore, contextPatterns, patternText, CONTEXT,
   maxCategory, maxRestBefore, MAX_REPS, currentE1, maxTestPlan, maxTestState, newMaxTest, maxTestHistory, maxTestDue, MUSCLES, musclesOf, planMuscleLoad, muscleLevel, prefillWeights, isUntouched,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;

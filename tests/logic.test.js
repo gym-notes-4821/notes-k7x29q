@@ -408,6 +408,35 @@ test('Check-in: trainierte Muskeln, Pump-Statistik, wenig Pump trotz viel Traini
   addTraining(db, d(5), full).checkin = { skipped: true };
   assert.strictEqual(L.recentCheckins().length, 4);
 });
+test('Check-in: Zwicken mit belasteten Übungen, Uhrzeit, Muster nach Schlaf/Uhrzeit/Essen', () => {
+  const db = L.freshDb(); L.setDb(db);
+  assert.deepStrictEqual(L.painExercises(db.plans[0], 'knee').map(e => e.name), ['Squats']);
+  assert.deepStrictEqual(L.painExercises(db.plans[0], 'lowback').map(e => e.name), ['Squats', 'Kreuzheben', 'Rudern sitzend']);
+  assert.ok(L.painExercises(db.plans[0], 'shoulder').some(e => e.name === 'Schulterdrücken'));
+  assert.strictEqual(L.timeOfDay(new Date(2026, 0, 1, 7, 30).getTime()), 'morning');
+  assert.strictEqual(L.timeOfDay(new Date(2026, 0, 1, 12, 0).getTime()), 'noon');
+  assert.strictEqual(L.timeOfDay(new Date(2026, 0, 1, 18, 45).getTime()), 'evening');
+  db.sessions[0].date = L.addDaysISO(today, -30);
+  const d = k => L.addDaysISO(today, -28 + k * 3);
+  // 8 Trainings: nach gutem Schlaf / abends besser, nach schlechtem Schlaf / morgens schlechter
+  let reps = 12;
+  for (let k = 0; k < 8; k++) {
+    const good = k % 2 === 0;
+    reps += good ? 1 : -1;
+    const s = addTraining(db, d(k), { 'Latziehen': [[45, reps]], 'Squats': [[10, reps]] });
+    s.checkin = { done: true, feel: 'ok', sleep: good ? 'good' : 'bad', time: good ? 'evening' : 'morning', ate: true, pain: k >= 6 ? ['knee'] : [] };
+  }
+  const pr = L.painReport(db.plans[0]);
+  assert.strictEqual(pr.length, 1); assert.strictEqual(pr[0].name, 'Knie');
+  assert.ok(pr[0].repeat && pr[0].n4 === 2); assert.deepStrictEqual(pr[0].exercises, ['Squats']);
+  const pat = L.contextPatterns();
+  assert.strictEqual(pat.checkins, 8);
+  const sleep = pat.patterns.find(p => p.dim === 'sleep'), time = pat.patterns.find(p => p.dim === 'time');
+  assert.ok(sleep && sleep.best === 'good' && sleep.worst === 'bad');
+  assert.strictEqual(L.patternText(sleep), 'Nach gutem Schlaf trainierst du deutlich besser als nach schlechtem Schlaf.');
+  assert.strictEqual(L.patternText(time), 'Abends bist du im Schnitt stärker als morgens.');
+  assert.ok(!pat.patterns.some(p => p.dim === 'ate'), 'immer gegessen → kein Vergleich möglich');
+});
 const v1 = require('./v1-sample.json'); // Daten im alten Format (Version 1)
 test('Migration: Version 1 lädt ohne Fehler, Trainings bleiben erhalten', () => {
   const d = L.migrate(v1); L.setDb(d);

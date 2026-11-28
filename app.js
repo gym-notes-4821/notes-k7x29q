@@ -605,12 +605,21 @@ function viewTrainings() {
 
 /* ---- Coach-Check-in nach dem Training ---- */
 let editingCheckin = null;
+const CTX_UI = {
+  sleep: { good: 'gut', ok: 'mittel', bad: 'schlecht' },
+  time: { morning: 'morgens', noon: 'mittags', evening: 'abends' },
+  ate: { yes: 'ja', no: 'nein' },
+};
+function ctxRow(k, label, val) {
+  return `<div class="ci-ctx-row"><span>${label}</span><div class="ci-seg small">${Object.entries(CTX_UI[k]).map(([v, l]) => `<button class="${val === v ? 'on' : ''} ${k === 'sleep' ? 'f-' + v : ''}" data-act="ci-set" data-k="${k}" data-v="${v}">${l}</button>`).join('')}</div></div>`;
+}
 function resultSession() { const m = location.hash.match(/^#\/ergebnis\/([^/]+)$/); return m && getSession(m[1]); }
 function checkinCard(s) {
   const ci = s.checkin || {};
   if ((ci.done || ci.skipped) && editingCheckin !== s.id) {
     if (ci.skipped) return `<div class="card ci-mini"><span class="muted">Check-in übersprungen</span><button class="btn-small btn-ghost" data-act="ci-edit">Nachholen</button></div>`;
-    return `<div class="card ci-mini"><span class="ci-sum"><span class="ci-l1">${icon('coach')}<b>Check-in:</b> ${feelChip(ci.feel) || '–'}</span>${(ci.pump || []).length ? `<span class="ci-l2">Pump: ${ci.pump.map(L.muscleName).map(esc).join(', ')}</span>` : ''}</span><button class="btn-small btn-ghost" data-act="ci-edit">Ändern</button></div>`;
+    const ctx = [ci.sleep && `Schlaf ${CTX_UI.sleep[ci.sleep]}`, ci.time && CTX_UI.time[ci.time], ci.ate != null && (ci.ate ? 'gegessen' : 'nüchtern')].filter(Boolean).join(' · ');
+    return `<div class="card ci-mini"><span class="ci-sum"><span class="ci-l1">${icon('coach')}<b>Check-in:</b> ${feelChip(ci.feel) || '–'}</span>${(ci.pump || []).length ? `<span class="ci-l2">Pump: ${ci.pump.map(L.muscleName).map(esc).join(', ')}</span>` : ''}${(ci.pain || []).length ? `<span class="ci-l2 ci-pain">Gezwickt: ${ci.pain.map(L.painName).map(esc).join(', ')}</span>` : ''}${ctx ? `<span class="ci-l2">${esc(ctx)}</span>` : ''}</span><button class="btn-small btn-ghost" data-act="ci-edit">Ändern</button></div>`;
   }
   const trained = L.musclesInSession(s), sel = ci.pump || [];
   const chips = L.MUSCLES.filter(([id]) => trained.includes(id) || sel.includes(id))
@@ -621,7 +630,12 @@ function checkinCard(s) {
     <div class="ci-q">Wo hast du den meisten Pump gespürt?</div><p class="muted small" style="margin-top:-4px">Tippe auf die Muskeln – mehrere möglich. Hell umrandet: heute trainiert.</p>
     <div class="bm-figs">${['front', 'back'].map(side => `<figure>${bodyPickSVG(side, trained, sel)}<figcaption>${side === 'front' ? 'vorne' : 'hinten'}</figcaption></figure>`).join('')}</div>
     <div class="chips ci-chips">${chips}</div>
-    <div class="ci-actions"><button class="btn-primary" data-act="ci-done" ${ci.feel || sel.length ? '' : 'disabled'}>Fertig</button><button class="btn-ghost" data-act="ci-skip">Überspringen</button></div></div>`;
+    <div class="ci-q">Hat etwas gezwickt?</div>
+    <div class="ci-seg">${[['no', 'Nein'], ['yes', 'Ja']].map(([v, l]) => `<button class="${(v === 'yes') === !!ci.painOn ? 'on' : ''} ${v === 'yes' ? 'warn' : ''}" data-act="ci-painon" data-v="${v}">${l}</button>`).join('')}</div>
+    ${ci.painOn ? `<p class="muted small">Wo? Mehrere möglich.</p><div class="chips ci-pain-chips">${L.PAIN_AREAS.map(([id, n]) => `<button class="chip ${(ci.pain || []).includes(id) ? 'on' : ''}" data-act="ci-pain" data-a="${id}">${esc(n)}</button>`).join('')}</div>` : ''}
+    <div class="ci-q">Rahmenbedingungen</div>
+    <div class="ci-ctx">${ctxRow('sleep', 'Schlaf letzte Nacht', ci.sleep)}${ctxRow('time', 'Uhrzeit', ci.time || L.timeOfDay(s.startedAt || s.createdAt))}${ctxRow('ate', 'Vorher gegessen', ci.ate == null ? null : ci.ate ? 'yes' : 'no')}</div>
+    <div class="ci-actions"><button class="btn-primary" data-act="ci-done" ${ci.feel || sel.length || ci.sleep || ci.ate != null || (ci.pain || []).length ? '' : 'disabled'}>Fertig</button><button class="btn-ghost" data-act="ci-skip">Überspringen</button></div></div>`;
 }
 
 /* ---------------- Fortschritt ---------------- */
@@ -690,7 +704,7 @@ function viewOutlook() {
 /* ---------------- Coach ---------------- */
 function coachTile(plan) {
   const r = plan ? L.coachReport(plan) : null;
-  const n = r ? r.counts.issues : 0;
+  const n = r ? r.counts.issues + L.painReport(plan).filter(p => p.n4).length : 0;
   const sub = !r ? 'Kein Plan' : n ? `${n} ${n === 1 ? 'Hinweis' : 'Hinweise'}` : r.counts.few === r.exercises.length ? 'ab 4 Trainings' : 'alles im Plan';
   return `<a class="tile tile-small" href="#/coach"><span class="ic">${icon('coach')}</span><span class="tc"><span class="tl">Coach</span><span class="tsub ${n ? 'warn' : ''}">${sub}</span></span>${n ? `<span class="hint">${n}</span>` : ''}</a>`;
 }
@@ -714,8 +728,10 @@ function viewCoach() {
   if (!plan) return h + '<p class="empty">Kein aktiver Plan.</p>';
   const r = L.coachReport(plan), c = r.counts, issues = r.exercises.filter(x => x.issue);
   const rated = r.exercises.length - c.few;
+  const pains = L.painReport(plan).filter(p => p.n4);
   let head, sub, cls;
-  if (!rated) { head = 'Noch zu wenig Daten'; sub = 'Ab 4 Trainings pro Übung kann ich deinen Verlauf bewerten. Bis dahin: dranbleiben!'; cls = 'grey'; }
+  if (pains.length) { head = `Achtung: Zwicken ${pains.length === 1 ? 'im Bereich ' + pains[0].name : 'an ' + pains.length + ' Stellen'}`; sub = `Gesundheit geht vor – schau dir die Hinweise unten an.${issues.length ? ` Dazu ${issues.length} ${issues.length === 1 ? 'Übung' : 'Übungen'} mit Handlungsbedarf.` : ''}`; cls = 'down'; }
+  else if (!rated) { head = 'Noch zu wenig Daten'; sub = 'Ab 4 Trainings pro Übung kann ich deinen Verlauf bewerten. Bis dahin: dranbleiben!'; cls = 'grey'; }
   else if (c.down && c.stagnant) { head = `${c.down + c.stagnant} Übungen brauchen Aufmerksamkeit`; sub = `${c.stagnant} ${c.stagnant === 1 ? 'stagniert' : 'stagnieren'}, ${c.down} ${c.down === 1 ? 'wird' : 'werden'} schwächer – mit kleinen Anpassungen geht es meist schnell wieder bergauf.`; cls = 'down'; }
   else if (c.down) { head = `${c.down} ${c.down === 1 ? 'Übung wird' : 'Übungen werden'} schwächer`; sub = 'Kein Grund zur Sorge – mit kleinen Anpassungen geht es meist schnell wieder bergauf.'; cls = 'down'; }
   else if (c.stagnant) { head = `${c.stagnant} ${c.stagnant === 1 ? 'Übung stagniert' : 'Übungen stagnieren'}`; sub = 'Der Rest läuft. Zeit für einen neuen Reiz bei diesen Übungen.'; cls = 'same'; }
@@ -724,6 +740,17 @@ function viewCoach() {
   h += `<p class="muted small">Plan: <b>${esc(plan.name)}</b> · bewertet aus deinen bisherigen Trainings</p>
     <div class="coach-hero s-${cls}"><div class="ch-title">${head}</div><div class="ch-sub">${sub}</div>
     <div class="ch-stats"><span class="s-up">${icon('stUp')}${c.up} steigend</span><span class="s-same">${icon('stSame')}${c.ok + c.stagnant} gleich</span><span class="s-down">${icon('stDown')}${c.down} schwächer</span></div></div>`;
+  if (pains.length) {
+    h += '<h2>Achtung: Zwicken</h2>';
+    for (const p of pains) {
+      const exs = plan.exercises.filter(e => p.exercises.includes(e.name));
+      h += `<div class="coach-card s-bad"><div class="prow-top"><span class="pname">${esc(p.name)}</span><span class="st">${icon('alert')}${p.n4}× zuletzt</span></div>
+        <p class="cc-reason">Zuletzt am ${fmtDate(p.last, 'tiny')} gezwickt${p.n > 1 ? ` – ${p.n}× in deinen letzten Check-ins` : ''}.${exs.length ? ` In deinem Plan belasten diese Stelle besonders: <b>${exs.map(e => esc(e.name)).join(', ')}</b>.` : ''}</p>
+        ${p.repeat ? '<p class="cc-warn">Das kam mehrmals vor – lass es bitte ärztlich oder physiotherapeutisch abklären, bevor du schwer weitertrainierst.</p>' : ''}
+        <div class="cc-label">Erst probieren</div><ul class="cc-tips"><li>Gewicht reduzieren und nur im schmerzfreien Bewegungsbereich arbeiten</li><li>Länger aufwärmen, die ersten Sätze bewusst leicht</li><li>Schmerz ist ein Stoppsignal – Übung dann lieber auslassen</li></ul>
+        ${exs.length ? `<div class="cc-label">Schonendere Alternativen</div><div class="cc-alts">${exs.flatMap(e => L.alternativesFor(e.name).slice(0, 2).map(a => `<button class="cc-alt" data-act="swap" data-ex="${esc(e.id)}" data-name="${esc(a.name)}">${icon('swap')}<span><b>${esc(e.name)} → ${esc(a.name)}</b><small>${esc(a.why)}</small></span></button>`)).join('')}</div>` : ''}</div>`;
+    }
+  }
   if (issues.length) {
     h += '<h2>Handlungsbedarf</h2>';
     for (const x of issues) {
@@ -741,6 +768,12 @@ function viewCoach() {
   }
   const ready = r.exercises.filter(x => x.feel && x.feel.type === 'ready' && !x.issue);
   if (ready.length) h += `<h2>Bereit für mehr</h2><div class="card cc-ready">${ready.map(x => `<a href="#/fortschritt/uebung/${encodeURIComponent(x.key)}">${icon('faceGood')}<span><b>${esc(x.name)}</b><small>2× in Folge „gut“ – ${x.feel.more === 'weight' ? 'nächstes Mal eine Gewichtsstufe höher' : 'mehr Wiederholungen anpeilen'}</small></span></a>`).join('')}</div>`;
+  const pat = L.contextPatterns();
+  if (pat.checkins) {
+    h += `<h2>Deine Muster</h2><div class="card cc-patterns">${pat.patterns.length
+      ? pat.patterns.map(p => `<div class="cc-check ok">${icon('check')}<span><b>${esc(L.patternText(p))}</b><small>aus ${p.n} Trainings mit Check-in</small></span></div>`).join('')
+      : `<p class="muted small">${pat.checkins < 6 ? `Ab etwa 6 Check-ins erkenne ich Muster bei Schlaf, Uhrzeit und Essen. Bisher: ${pat.checkins}.` : 'Noch keine deutlichen Unterschiede bei Schlaf, Uhrzeit oder Essen – gut so!'}</p>`}</div>`;
+  }
   const ps = L.pumpStats(plan);
   if (ps.total) {
     const heat = {}; for (const [id] of L.MUSCLES) { const q = ps.rate(id); heat[id] = q >= 0.5 ? 4 : q >= 0.25 ? 2 : q > 0 ? 1 : 0; }
@@ -1172,7 +1205,7 @@ $app.addEventListener('click', ev => {
       if (!confirm(`„${e.name}“ im Plan durch „${name}“ ersetzen?\n\nSätze, Pause und Supersatz bleiben gleich. „${name}“ startet mit einem eigenen Verlauf – deine bisherigen Einträge bleiben im Fortschritt unter „Weitere Übungen“ erhalten.`)) return;
       const old = L.swapExercise(plan, e.id, name); save(); rerenderKeepScroll(); toast(`${old} → ${name}`); break;
     }
-    case 'ci-feel': case 'ci-pump': case 'ci-done': case 'ci-skip': case 'ci-edit': {
+    case 'ci-feel': case 'ci-pump': case 'ci-done': case 'ci-skip': case 'ci-edit': case 'ci-painon': case 'ci-pain': case 'ci-set': {
       const rs = resultSession(); if (!rs) return;
       if (act === 'ci-edit') { editingCheckin = rs.id; if (rs.checkin && rs.checkin.skipped) rs.checkin = {}; rerenderKeepScroll(); return; }
       if (act === 'ci-skip') { rs.checkin = { skipped: true }; editingCheckin = null; save(); rerenderKeepScroll(); return; }
@@ -1180,7 +1213,17 @@ $app.addEventListener('click', ev => {
       delete rs.checkin.skipped;
       if (act === 'ci-feel') rs.checkin.feel = rs.checkin.feel === b.dataset.v ? undefined : b.dataset.v;
       if (act === 'ci-pump') { const m = b.dataset.m; rs.checkin.pump = rs.checkin.pump.includes(m) ? rs.checkin.pump.filter(x => x !== m) : rs.checkin.pump.concat(m); }
-      if (act === 'ci-done') { rs.checkin.done = true; editingCheckin = null; toast('Danke! Der Coach merkt sich das.'); }
+      if (act === 'ci-painon') { rs.checkin.painOn = b.dataset.v === 'yes'; if (!rs.checkin.painOn) rs.checkin.pain = []; }
+      if (act === 'ci-pain') { const a = b.dataset.a, cur = rs.checkin.pain || []; rs.checkin.pain = cur.includes(a) ? cur.filter(x => x !== a) : cur.concat(a); }
+      if (act === 'ci-set') {
+        const k = b.dataset.k, v = b.dataset.v;
+        if (k === 'ate') rs.checkin.ate = rs.checkin.ate === (v === 'yes') ? undefined : v === 'yes';
+        else rs.checkin[k] = rs.checkin[k] === v ? undefined : v;
+      }
+      if (act === 'ci-done') {
+        if (!rs.checkin.time) rs.checkin.time = L.timeOfDay(rs.startedAt || rs.createdAt);
+        rs.checkin.done = true; editingCheckin = null; toast('Danke! Der Coach merkt sich das.');
+      }
       save(); rerenderKeepScroll(); return;
     }
     case 'feel': {

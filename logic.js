@@ -53,16 +53,16 @@ const e1rm = s => s.w * (1 + s.r / 30);
 const START_PLAN_ID = 'plan-ganzkoerper-v2';
 // [Name, Gewicht (bei Kurzhanteln pro Hantel), Wiederholungen je Satz (Startwerte), Supersatz, pro Hantel, Sätze im Plan, feste ID]
 const START_VALUES = [
-  ['Squats', 10, [12, 12, 8], null, false],
-  ['Kreuzheben', 42.5, [12, 10], null, false, 3],
-  ['Bankdrücken mit Kurzhanteln', 17.5, [12, 12, 8], null, true],
-  ['Latziehen', 45, [12, 12, 10], null, false],
-  ['Butterfly mit Kurzhanteln', 12.5, [12, 11, 9], null, true],
-  ['Rudern sitzend', 20, [12, 12, 12], null, false], // Rudern im Sitzen an der Maschine
-  ['Schulterdrücken', 7.5, [12, 12, 10], null, true, 2],
-  ['Bizepscurls', 12, [13, 13], 'A', true],
-  ['Trizeps am Turm 1', 18, [13, 13], 'A', false],
-  ['Seitheben', 5, [13, 13], 'A', true],
+  ['Squats', 10, [12, 12, 8], null, false, 0, 'gk-1'],
+  ['Kreuzheben', 42.5, [12, 10], null, false, 3, 'gk-2'],
+  ['Latziehen', 45, [12, 12, 10], null, false, 0, 'gk-4'],
+  ['Bankdrücken mit Kurzhanteln', 17.5, [12, 12, 8], null, true, 0, 'gk-3'],
+  ['Rudern sitzend', 20, [12, 12, 12], null, false, 0, 'gk-6'], // Rudern im Sitzen an der Maschine
+  ['Butterfly mit Kurzhanteln', 12.5, [12, 11, 9], null, true, 2, 'gk-5'],
+  ['Schulterdrücken', 7.5, [12, 12, 10], null, true, 2, 'gk-7'],
+  ['Bizepscurls', 12, [13, 13], 'A', true, 0, 'gk-8'],
+  ['Trizeps am Turm 1', 18, [13, 13], 'A', false, 0, 'gk-9'],
+  ['Seitheben', 5, [13, 13], 'A', true, 0, 'gk-10'],
   ['Vorgebeugtes Seitheben', null, [], 'A', true, 2, 'gk-14'], // hintere Schulter, noch ohne Startwerte
   ['Hammercurls', 12.5, [13, 12], 'B', true, 0, 'gk-11'],
   ['Trizeps am Turm 2', 18, [13, 10], 'B', false, 0, 'gk-12'],
@@ -142,7 +142,7 @@ function renameInStartPlan(d, oldName, newName) {
   }
 }
 const validDb = d => !!d && Array.isArray(d.plans) && Array.isArray(d.sessions);
-const DATA_VERSION = 8;
+const DATA_VERSION = 9;
 /** Bringt Daten beliebiger älterer Version auf die aktuelle Version. Selbst eingetragene Trainings bleiben unverändert. */
 function migrate(input) {
   if (!validDb(input)) throw new Error('Ungültiges Datenformat');
@@ -254,6 +254,30 @@ function migrate(input) {
       }
     }
     d.version = 8;
+  }
+  if (d.version < 9) {
+    // Version 9: Drücken und Ziehen abwechseln; Butterfly mit 2 statt 3 Sätzen.
+    const ORDER = ['squats', 'kreuzheben', 'latziehen', 'bankdrücken mit kurzhanteln', 'rudern sitzend', 'butterfly mit kurzhanteln', 'schulterdrücken'];
+    const reorder = (list, keyOf) => {
+      const pos = x => ORDER.findIndex(k => sameKeyIn(d, keyOf(x), k));
+      const head = list.filter(x => pos(x) >= 0).sort((a, b) => pos(a) - pos(b));
+      return head.concat(list.filter(x => pos(x) < 0));
+    };
+    const plan = d.plans.find(p => p.id === START_PLAN_ID);
+    if (plan) {
+      plan.exercises = reorder(plan.exercises, e => normKey(e.name));
+      const bf = plan.exercises.find(e => normKey(e.name) === 'butterfly mit kurzhanteln');
+      if (bf && bf.sets === 3) bf.sets = 2;
+      for (const s of d.sessions) {
+        if (s.status !== 'active' || s.planId !== START_PLAN_ID) continue;
+        const wasUntouched = s.prefill && isUntouched(s);
+        s.exercises = reorder(s.exercises, e => e.key);
+        const ex = s.exercises.find(x => x.key === 'butterfly mit kurzhanteln');
+        if (bf && bf.sets === 2 && ex && ex.sets.length === 3 && ex.sets[2].r == null) { ex.sets.pop(); ex.targetSets = 2; }
+        if (wasUntouched) s.prefill = weightSignature(s);
+      }
+    }
+    d.version = 9;
   }
   if (!d.plans.some(p => p.id === d.activePlanId)) d.activePlanId = d.plans[0] ? d.plans[0].id : null;
   return d;

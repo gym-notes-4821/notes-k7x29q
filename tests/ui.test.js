@@ -43,8 +43,8 @@ const STORE = 'trainingsapp.v1';
   // 2. Training: 12 Übungen, Startwerte als „Letztes Mal“
   await go(''); await page.click('.tile-main'); await page.waitForSelector('.ex-card');
   const names = await page.evaluate(() => [...document.querySelectorAll('.ex-card h3, .ss-li-top b')].map(e => e.textContent));
-  ok(JSON.stringify(names) === JSON.stringify(['Squats', 'Kreuzheben', 'Bankdrücken mit Kurzhanteln', 'Latziehen', 'Butterfly mit Kurzhanteln',
-    'Rudern sitzend', 'Schulterdrücken', 'Supersatz A', 'Bizepscurls', 'Trizeps am Turm 1', 'Seitheben', 'Vorgebeugtes Seitheben', 'Supersatz B', 'Hammercurls', 'Trizeps am Turm 2', 'Crunches am Kabelzug']), '2 14 Übungen in richtiger Reihenfolge (mit Supersatz-Karten)');
+  ok(JSON.stringify(names) === JSON.stringify(['Squats', 'Kreuzheben', 'Latziehen', 'Bankdrücken mit Kurzhanteln', 'Rudern sitzend',
+    'Butterfly mit Kurzhanteln', 'Schulterdrücken', 'Supersatz A', 'Bizepscurls', 'Trizeps am Turm 1', 'Seitheben', 'Vorgebeugtes Seitheben', 'Supersatz B', 'Hammercurls', 'Trizeps am Turm 2', 'Crunches am Kabelzug']), '2 14 Übungen in richtiger Reihenfolge (mit Supersatz-Karten)');
   const card = n => page.locator('.ex-card:not(.superset)', { has: page.locator('h3', { hasText: n }) });
   const latLast = await card('Latziehen').locator('.last').innerText();
   ok(/^Letztes Mal \(Startwerte, \d\d\.\d\d\.\): 45 kg × 12 \/ 12 \/ 10$/.test(latLast), '2 „Letztes Mal“ zeigt Startwerte: ' + latLast);
@@ -53,7 +53,7 @@ const STORE = 'trainingsapp.v1';
   const repsOf = async n => card(n).locator('input[data-f=r]').evaluateAll(els => els.map(e => e.value).join('/'));
   ok(await kgOf('Latziehen') === '45/45/45' && await repsOf('Latziehen') === '//', '2 kg vom letzten Mal vorausgefüllt, Wdh. leer');
   ok(await kgOf('Kreuzheben') === '42,5/42,5/42,5', '2 Kreuzheben mit 3 Sätzen, 42,5 vorausgefüllt');
-  ok(await kgOf('Bankdrücken mit Kurzhanteln') === '17,5/17,5/17,5' && await kgOf('Butterfly mit Kurzhanteln') === '12,5/12,5/12,5' && await kgOf('Schulterdrücken') === '7,5/7,5', '2 Kurzhanteln pro Hantel (17,5 / 12,5 / 7,5)');
+  ok(await kgOf('Bankdrücken mit Kurzhanteln') === '17,5/17,5/17,5' && await kgOf('Butterfly mit Kurzhanteln') === '12,5/12,5' && await kgOf('Schulterdrücken') === '7,5/7,5', '2 Kurzhanteln pro Hantel (17,5 / 12,5 / 7,5)');
   await card('Squats').locator('.set-row').nth(0).locator('input[data-f=w]').fill('12,5');
   await card('Squats').locator('.set-row').nth(0).locator('input[data-f=w]').blur();
   ok(await kgOf('Squats') === '12,5/12,5/12,5', '2 Geändertes Gewicht wird an Folgesätze weitergegeben');
@@ -243,7 +243,7 @@ const STORE = 'trainingsapp.v1';
   await p2.evaluate(([k, d]) => localStorage.setItem(k, JSON.stringify(d)), [STORE, v1]);
   await p2.reload(); await p2.waitForSelector('.tile');
   const d2 = await p2.evaluate(k => JSON.parse(localStorage.getItem(k)), STORE);
-  ok(err2 === 0 && d2.version === 8 && d2.sessions.some(s => s.id === 'old1'), '8 Version-1-Daten laden ohne Fehler, alte Trainings erhalten');
+  ok(err2 === 0 && d2.version === 9 && d2.sessions.some(s => s.id === 'old1'), '8 Version-1-Daten laden ohne Fehler, alte Trainings erhalten');
   await p2.goto(URL + '#/fortschritt'); await p2.waitForSelector('.prow');
   ok(await p2.locator('h2', { hasText: 'Weitere Übungen' }).count() === 1, '8 Alte Übungen bleiben als „Weitere Übungen“ erreichbar');
   await p2.goto(URL + '#/fortschritt/uebung/latziehen'); await p2.waitForSelector('.hist');

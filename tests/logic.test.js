@@ -341,6 +341,31 @@ test('Coach: Alternativen für jede Übung des Standardplans, Tausch behält Sä
   assert.ok(sq.perDumbbell && sq.sets === 3 && sq.rest === 120);
   assert.strictEqual(L.exerciseHistory('bulgarische split squats').length, 0, 'neue Übung, neuer Verlauf');
 });
+test('Maximalkraft: Reihenfolge wie im Training, Startgewicht, Aufwärmen, nächster Versuch, Ergebnis, Fälligkeit', () => {
+  const db = L.freshDb(); L.setDb(db);
+  db.sessions[0].date = L.addDaysISO(today, -20);
+  const t = L.newMaxTest(db.plans[0], today);
+  assert.deepStrictEqual(t.exercises.map(e => e.name), ['Squats', 'Kreuzheben', 'Latziehen', 'Bankdrücken mit Kurzhanteln', 'Rudern sitzend', 'Schulterdrücken'], 'Reihenfolge wie im Training');
+  assert.strictEqual(L.maxRestBefore('Squats', 'Kreuzheben'), 300); assert.strictEqual(L.maxRestBefore('Kreuzheben', 'Latziehen'), 180);
+  const lat = L.maxTestPlan('latziehen', false);          // Startwerte 45 × 12 → 1RM 63 → 5RM ≈ 54
+  assert.ok(Math.abs(lat.expected - 54) < 0.01); assert.strictEqual(lat.start, 50);
+  assert.deepStrictEqual(lat.warmups, [{ w: 25, r: 8 }, { w: 35, r: 5 }, { w: 42.5, r: 2 }]);
+  assert.strictEqual(L.maxTestPlan('bankdrücken mit kurzhanteln', true).step, 1, 'Kurzhanteln in 1-kg-Schritten');
+  const ex = { perDumbbell: false, attempts: [{ w: 50, r: 9 }] };
+  let st = L.maxTestState(ex);
+  assert.ok(!st.done && st.next === 55, String(st.next));   // 9 Wdh.: direkt auf das geschätzte 5RM (55,7 → abgerundet 55)
+  ex.attempts.push({ w: 55, r: 5 }); st = L.maxTestState(ex);
+  assert.ok(!st.done && st.next === 57.5);                  // +5 %, abgerundet auf 2,5
+  ex.attempts.push({ w: 57.5, r: 3 }); st = L.maxTestState(ex);
+  assert.ok(st.done); assert.strictEqual(st.result.w5, 55);
+  assert.strictEqual(st.result.e1, 65);                      // bester Schätzwert: 50 × 9 → 65 kg
+  assert.strictEqual(L.maxTestDue(today).due, true, 'ohne Test: fällig');
+  t.exercises.find(e => e.name === 'Latziehen').attempts = ex.attempts; t.status = 'done'; t.date = L.addDaysISO(today, -10); db.maxTests.push(t);
+  const due = L.maxTestDue(today);
+  assert.ok(!due.due && due.inDays === 18);
+  assert.strictEqual(L.maxTestHistory('latziehen').length, 1);
+  assert.strictEqual(L.currentE1('latziehen').e1, 65, 'Test ist jünger als das letzte Training');
+});
 const v1 = require('./v1-sample.json'); // Daten im alten Format (Version 1)
 test('Migration: Version 1 lädt ohne Fehler, Trainings bleiben erhalten', () => {
   const d = L.migrate(v1); L.setDb(d);
@@ -545,7 +570,7 @@ test('Migration Version 9 → 10: Pausenzeiten und Ton-Einstellung', () => {
   old.plans.push({ id: 'x', name: 'Eigener', exercises: [{ id: 'a', name: 'Beinpresse', sets: 3, guide: null, perDumbbell: false, group: 'A' }, { id: 'b', name: 'Wadenheben', sets: 3, guide: null, perDumbbell: false, group: 'A' }] });
   const d = L.migrate(old);
   assert.strictEqual(d.version, L.DATA_VERSION);
-  assert.deepStrictEqual(d.settings, { sound: true, weeklyGoal: 3 });
+  assert.deepStrictEqual(d.settings, { sound: true, weeklyGoal: 3, maxTestEvery: 28 });
   assert.strictEqual(d.plans[0].exercises[0].rest, 120);
   assert.deepStrictEqual(d.plans[1].exercises.map(e => e.rest), [120, 120], 'Supersatz: längste Pause gilt für alle');
 });

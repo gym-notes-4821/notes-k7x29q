@@ -56,6 +56,7 @@ const ICON_PATHS = {
   note: '<path d="M4 20h4L19 9l-4-4L4 16z"/><path d="M13.5 6.5l4 4"/>',
   trophy: '<path d="M8 4h8v5a4 4 0 0 1-8 0z"/><path d="M8 6H5a3 3 0 0 0 3 4M16 6h3a3 3 0 0 1-3 4"/><path d="M12 13v4M8.5 20h7"/>',
   plus: '<path d="M12 5v14M5 12h14"/>',
+  bolt: '<path d="M13 3L5 14h6l-1 7 8-11h-6z"/>',
   coach: '<path d="M4 5h16v11H9.5L5 20v-4H4z"/><path d="M8.5 10.5l2.5 2.5 4.5-4.5"/>',
   swap: '<path d="M4 8h13l-3-3M20 16H7l3 3"/>',
   check: '<path d="M5 12.5l4.5 4.5L19 7.5"/>',
@@ -253,7 +254,8 @@ const fmtRest = sec => sec >= 60 ? `${Math.floor(sec / 60)}:${String(sec % 60).p
 const Rest = (() => {
   const el = document.getElementById('rest');
   let tick = null, wake = null, audio = null, doneShown = false;
-  const sess = () => { const s = currentSession(); return s && s.status === 'active' ? s : null; };
+  // Timer gehört zum laufenden Training oder zum laufenden Maximalkrafttest
+  const sess = () => { const s = currentSession() || currentTest(); return s && s.status === 'active' ? s : null; };
   const left = r => Math.ceil((r.endAt - Date.now()) / 1000);
   const mmss = sec => `${Math.floor(Math.max(0, sec) / 60)}:${String(Math.max(0, sec) % 60).padStart(2, '0')}`;
   // Ton: Web Audio muss auf dem iPhone einmal durch eine Berührung freigeschaltet werden
@@ -293,7 +295,7 @@ const Rest = (() => {
     save(); doneShown = false; keepAwake(true); sync();
   }
   function stop() {
-    const s = currentSession(); if (s && s.rest) { delete s.rest; save(); }
+    const s = currentSession() || currentTest(); if (s && s.rest) { delete s.rest; save(); }
     hide(); keepAwake(false);
   }
   function hide() { el.hidden = true; document.body.classList.remove('has-rest'); document.documentElement.classList.remove('has-rest'); clearInterval(tick); tick = null; }
@@ -330,7 +332,7 @@ const Rest = (() => {
   });
   document.addEventListener('visibilitychange', () => { if (!document.hidden) { sync(); if (!el.hidden) keepAwake(true); } });
   return {
-    sync, stop,
+    sync, stop, start,
     afterSet(s, i, j, inputElement) {
       if (s.status !== 'active') return;
       const sec = L.restAfter(s, i, j);
@@ -353,11 +355,16 @@ const routes = [
   [/^#\/fortschritt\/uebung\/([^/]+)$/, key => viewExercise(key, false)],
   [/^#\/ausblick$/, viewOutlook],
   [/^#\/coach$/, viewCoach],
+  [/^#\/maxkraft$/, viewMax],
+  [/^#\/maxkraft\/test\/([^/]+)$/, viewMaxTest],
   [/^#\/ausblick\/uebung\/([^/]+)$/, key => viewExercise(key, true)],
 ];
 let lastHash = location.hash;
 function cleanupEmptySessions(keepId) {
-  const before = db.sessions.length;
+  const before = db.sessions.length, tb = (db.maxTests || []).length;
+  const mt = location.hash.match(/^#\/maxkraft\/test\/([^/]+)$/);
+  db.maxTests = (db.maxTests || []).filter(t => t.status !== 'active' || (mt && mt[1] === t.id) || t.exercises.some(e => e.attempts.length || e.warmDone.length || e.skipped));
+  if (db.maxTests.length !== tb) save();
   db.sessions = db.sessions.filter(s => s.id === keepId || !untouched(s));
   if (db.sessions.length !== before) save();
 }
@@ -390,6 +397,7 @@ function viewHome() {
       <a class="tile" href="#/fortschritt"><span class="ic">${icon('progress')}</span><span class="tl">Fortschritt</span></a>
       <a class="tile" href="#/ausblick"><span class="ic">${icon('outlook')}</span><span class="tl">Ausblick</span></a>
       ${coachTile(plan)}
+      ${maxTile()}
     </div></div>`;
 }
 
@@ -618,8 +626,13 @@ function viewOutlook() {
 function coachTile(plan) {
   const r = plan ? L.coachReport(plan) : null;
   const n = r ? r.counts.stagnant + r.counts.down : 0;
-  const sub = !r ? 'Kein Plan' : n ? `${n} ${n === 1 ? 'Übung braucht' : 'Übungen brauchen'} Aufmerksamkeit` : r.counts.few === r.exercises.length ? 'Bewertet ab 4 Trainings' : 'Plan & Fortschritt im Check';
-  return `<a class="tile tile-coach" href="#/coach"><span class="ic">${icon('coach')}</span><span class="tc"><span class="tl">Coach</span><span class="tsub">${sub}</span></span>${n ? `<span class="hint">${n}</span>` : ''}</a>`;
+  const sub = !r ? 'Kein Plan' : n ? `${n} ${n === 1 ? 'Hinweis' : 'Hinweise'}` : r.counts.few === r.exercises.length ? 'ab 4 Trainings' : 'alles im Plan';
+  return `<a class="tile tile-small" href="#/coach"><span class="ic">${icon('coach')}</span><span class="tc"><span class="tl">Coach</span><span class="tsub ${n ? 'warn' : ''}">${sub}</span></span>${n ? `<span class="hint">${n}</span>` : ''}</a>`;
+}
+function maxTile() {
+  const run = (db.maxTests || []).find(t => t.status === 'active'), due = L.maxTestDue();
+  const sub = run ? 'Test läuft' : !due.last ? 'noch kein Test' : due.due ? 'Test fällig' : `in ${due.inDays} ${due.inDays === 1 ? 'Tag' : 'Tagen'}`;
+  return `<a class="tile tile-small" href="#/maxkraft"><span class="ic">${icon('bolt')}</span><span class="tc"><span class="tl">Maximalkraft</span><span class="tsub ${run || due.due ? 'warn' : ''}">${sub}</span></span></a>`;
 }
 const STATE = {
   up: ['Steigend', 'up', 'stUp'], ok: ['Im Rahmen', 'same', 'stSame'], stagnant: ['Stagniert', 'same', 'stSame'],
@@ -665,6 +678,8 @@ function viewCoach() {
   checks.push([r.minutes <= 80, `Dauer ca. ${r.minutes} Minuten`, r.minutes <= 80 ? 'mit Pausen laut Plan und 10 min Aufwärmen' : 'recht lang – Supersätze oder weniger Sätze sparen Zeit']);
   const avg = r.weeks.reduce((a, b) => a + b, 0) / r.weeks.length;
   checks.push([avg >= r.goal * 0.75, `Regelmäßigkeit: Ø ${fmtNum(round1(avg))} von ${r.goal} Trainings pro Woche`, `letzte 4 Wochen: ${r.weeks.join(' · ')}`]);
+  const md = L.maxTestDue();
+  checks.push([md.last ? !md.due : null, md.last ? `Maximalkrafttest zuletzt am ${fmtDate(md.last, 'tiny')}` : 'Noch kein Maximalkrafttest', md.last ? (md.due ? 'fällig – unter „Maximalkraft“ starten' : `nächster in ${md.inDays} Tagen`) : 'ermittle deinen Ausgangswert unter „Maximalkraft“']);
   const names = plan.exercises.map(e => normKey(e.name));
   if (names.some(n => /squat|kniebeuge/.test(n)) && names.some(n => /kreuzheben/.test(n)))
     checks.push([null, 'Squats und Kreuzheben in jedem Training', 'belastet den unteren Rücken – bei steigenden Gewichten abwechseln']);
@@ -675,6 +690,93 @@ function viewCoach() {
   h += '<p class="muted small">Der Coach gibt allgemeine Trainingshinweise auf Basis deiner Einträge – keine medizinische Beratung.</p>';
   return h;
 }
+
+/* ---------------- Maximalkraft ---------------- */
+function currentTest() { const m = location.hash.match(/^#\/maxkraft\/test\/([^/]+)$/); return m && (db.maxTests || []).find(t => t.id === m[1]); }
+const kg = w => `${fmtNum(w)} kg`;
+function maxResultRow(e) {
+  const key = normKey(e.name), hist = L.maxTestHistory(key);
+  const last = hist[hist.length - 1], prev = hist[hist.length - 2];
+  if (!last) {
+    const est = L.currentE1(key);
+    return `<div class="mx-row"><div class="c-main"><span class="pname">${esc(e.name)}</span><span class="c-delta">${est ? `aus dem Training geschätzt: ca. ${kg(round1(est.e1))}` : 'noch keine Werte'}</span></div><span class="mx-val muted">–</span></div>`;
+  }
+  const d = prev ? (last.result.e1 / prev.result.e1 - 1) * 100 : null;
+  return `<div class="mx-row"><div class="c-main"><span class="pname">${esc(e.name)}</span>
+    <span class="c-delta">${last.result.w5 ? `5RM ${kg(last.result.w5)} × 5` : 'kein voller 5er'} · ${fmtDate(last.date, 'tiny')}${d != null ? ` · <b class="${d > 0.5 ? 'c-up' : d < -0.5 ? 'c-down' : ''}">${fmtPct(d)}</b>` : ''}</span></div>
+    ${sparkline(hist.map(x => x.result.e1))}<span class="mx-val"><b>${fmtNum(round1(last.result.e1))}</b><small>kg 1RM</small></span></div>`;
+}
+function viewMax() {
+  const plan = activePlan();
+  let h = topbar('Maximalkraft');
+  if (!plan) return h + '<p class="empty">Kein aktiver Plan.</p>';
+  const run = (db.maxTests || []).find(t => t.status === 'active'), due = L.maxTestDue();
+  const exs = plan.exercises.filter(e => L.maxCategory(e.name) >= 0);
+  const weeks = Math.round(due.every / 7);
+  let title, sub;
+  if (run) { title = 'Test läuft'; sub = `Begonnen am ${fmtDate(run.date, 'tiny')}`; }
+  else if (!due.last) { title = 'Noch kein Test'; sub = 'Ermittle deine Ausgangswerte – danach siehst du hier deine Entwicklung.'; }
+  else if (due.due) { title = 'Test fällig'; sub = `Letzter Test vor ${due.days} Tagen (${fmtDate(due.last, 'tiny')}).`; }
+  else { title = `Nächster Test in ${due.inDays} ${due.inDays === 1 ? 'Tag' : 'Tagen'}`; sub = `Letzter Test am ${fmtDate(due.last, 'tiny')}.`; }
+  h += `<div class="coach-hero ${run || due.due ? 's-up' : ''}"><div class="ch-title">${title}</div><div class="ch-sub">${sub}</div>
+    <button class="btn-primary btn-block btn-big" style="margin-top:12px" data-act="max-start">${icon('bolt')}${run ? 'Test fortsetzen' : 'Test starten'}</button></div>
+    <h2>Deine Maximalkraft</h2><p class="muted small list-hint">Geschätztes Maximalgewicht (1RM) aus dem schwersten sauberen 5er</p>
+    <div class="card mx-list">${exs.map(maxResultRow).join('') || '<p class="muted">Keine passenden Grundübungen im Plan.</p>'}</div>
+    <details class="card mx-how"><summary>So läuft der Test</summary>
+      <ol><li>5–10 Minuten allgemein aufwärmen.</li><li>Pro Übung die vorgeschlagenen Aufwärmsätze machen.</li>
+      <li>Erster Versuch mit dem vorgeschlagenen Gewicht: so viele saubere Wiederholungen wie möglich, höchstens bis die Technik leidet.</li>
+      <li>5 oder mehr geschafft? Nach 3 Minuten Pause schwerer – die App schlägt das Gewicht vor.</li>
+      <li>Weniger als 5 oder 5 Versuche erreicht: fertig. Es zählt der schwerste saubere 5er.</li>
+      <li>Reihenfolge wie im Training – so bleiben die Tests untereinander und mit dem Training vergleichbar. Vor Kreuzheben direkt nach Squats 5 Minuten Pause.</li>
+      <li>Squats und Bankdrücken mit Sicherung (Ablagen/Partner).</li></ol>
+      <p class="muted small">Ein Test ersetzt ein normales Training. Teste ausgeruht, nicht nach einer harten Woche.</p></details>
+    <h2>Rhythmus</h2><div class="card goal-card"><span class="spacer">Test alle</span>
+      <button class="btn-icon" data-act="max-every" data-d="-1" ${weeks <= 2 ? 'disabled' : ''} aria-label="kürzer">−</button><b class="goal-n">${weeks}</b>
+      <button class="btn-icon" data-act="max-every" data-d="1" ${weeks >= 16 ? 'disabled' : ''} aria-label="länger">+</button><span>Wochen</span></div>`;
+  const done = (db.maxTests || []).filter(t => t.status === 'done').sort(L.sessionOrder).reverse();
+  if (done.length) h += `<h2>Bisherige Tests</h2>${done.map(t => `<a class="card link row" href="#/maxkraft/test/${t.id}"><span class="spacer"><b>${fmtDate(t.date, 'long')}</b><span class="muted small" style="display:block">${t.exercises.filter(e => !e.skipped && e.attempts.length).length} Übungen getestet</span></span><span class="muted">›</span></a>`).join('')}`;
+  return h;
+}
+function viewMaxTest(id) {
+  const t = currentTest();
+  if (!t) return topbar('Maximalkrafttest', '#/maxkraft') + '<p class="empty">Test nicht gefunden.</p>';
+  let h = topbar('Maximalkrafttest', '#/maxkraft', true);
+  const doneN = t.exercises.filter(e => e.skipped || L.maxTestState(e).done).length;
+  h += `<div class="wk-info"><div class="row"><div class="spacer"><b>${doneN} von ${t.exercises.length} Übungen fertig</b>
+    <div class="muted small">Reihenfolge wie im Training · 3 Minuten Pause zwischen den Versuchen</div></div>
+    <label class="date-lbl"><span class="muted small">Datum</span><input type="date" data-act="mx-date" value="${t.date}" max="${todayISO()}" aria-label="Datum"></label></div>
+    <div class="progress"><div style="width:${Math.round(doneN / Math.max(1, t.exercises.length) * 100)}%"></div></div></div>`;
+  t.exercises.forEach((ex, i) => {
+    const st = L.maxTestState(ex), plan = L.maxTestPlan(ex.key, ex.perDumbbell);
+    const headTag = ex.skipped ? '<span class="tag">übersprungen</span>' : st.done ? `<span class="tag green">${icon('check')}fertig</span>` : '';
+    h += `<section class="ex-card mx-card ${st.done ? 'mx-done' : ''}"><div class="ex-head"><h3>${i + 1}. ${esc(ex.name)}</h3>${ex.perDumbbell ? '<span class="pd">pro Hantel</span>' : ''}${headTag}</div>`;
+    if (ex.skipped) { h += `<div class="ex-actions"><button data-act="mx-unskip" data-mx="${i}">Doch testen</button></div></section>`; return; }
+    h += `<p class="last">${plan.expected ? `Erwartet: ca. <b>${kg(roundStepUI(plan.expected, plan.step))} × 5</b> · aktuelles 1RM ca. ${kg(round1(plan.expected * (1 + 5 / 30)))}` : 'Noch keine Werte – beginne leicht und steigere dich.'}</p>`;
+    if (plan.warmups.length && !st.done) h += `<div class="cc-label">Aufwärmen (antippen, wenn erledigt)</div><div class="mx-warm">${plan.warmups.map((w, k) => `<button class="chip ${ex.warmDone.includes(k) ? 'on' : ''}" data-act="mx-warm" data-mx="${i}" data-k="${k}">${ex.warmDone.includes(k) ? icon('check') : ''}${kg(w.w)} × ${w.r}</button>`).join('')}</div>`;
+    h += '<div class="cc-label">Versuche</div><div class="sets">';
+    const rows = ex.attempts.length + (st.done ? 0 : 1);
+    for (let k = 0; k < rows; k++) {
+      const a = ex.attempts[k] || { w: k === 0 ? plan.start : st.next, r: null };
+      h += `<div class="set-row mx-set ${isValidSet(a) ? 'complete' : ''}"><span class="no">${k + 1}</span>
+        <input type="text" inputmode="decimal" autocomplete="off" data-mx="${i}" data-at="${k}" data-f="w" value="${fmtNum(a.w)}" placeholder="kg" aria-label="Versuch ${k + 1} Gewicht">
+        <span class="x">×</span>
+        <input type="text" inputmode="numeric" pattern="[0-9]*" autocomplete="off" data-mx="${i}" data-at="${k}" data-f="r" value="${a.r ?? ''}" placeholder="Wdh." aria-label="Versuch ${k + 1} Wiederholungen"></div>`;
+    }
+    h += `</div><p class="mx-msg ${st.done ? 'done' : ''}">${esc(st.msg)}</p>`;
+    if (st.result && st.result.e1) {
+      const hist = L.maxTestHistory(ex.key).filter(x => x.testId !== t.id), prev = hist[hist.length - 1];
+      const d = prev ? (st.result.e1 / prev.result.e1 - 1) * 100 : null;
+      h += `<div class="mx-result"><div><span>5RM</span><b>${st.result.w5 ? kg(st.result.w5) : '–'}</b></div><div><span>Maximalkraft (1RM)</span><b>ca. ${kg(round1(st.result.e1))}</b></div>
+        ${d != null ? `<div><span>seit ${fmtDate(prev.date, 'tiny')}</span><b class="${d > 0.5 ? 'c-up' : d < -0.5 ? 'c-down' : ''}">${fmtPct(d)}</b></div>` : ''}</div>`;
+    }
+    h += `<div class="ex-actions">${st.done ? '' : `<button data-act="mx-skip" data-mx="${i}">Überspringen</button>`}${ex.attempts.length && st.done ? `<button data-act="mx-more" data-mx="${i}">Noch ein Versuch</button>` : ''}</div></section>`;
+  });
+  h += '<div class="wk-footer stack">';
+  if (t.status === 'active') h += `<button class="btn-primary btn-block btn-big" data-act="mx-finish">Test abschließen</button><button class="btn-danger btn-block" data-act="mx-discard">Test verwerfen</button>`;
+  else h += `<a class="btn btn-primary btn-block btn-big" href="#/maxkraft">Fertig</a><button class="btn-danger btn-block" data-act="mx-discard">Test löschen</button>`;
+  return h + '</div>';
+}
+const roundStepUI = (w, step) => Math.round(w / step) * step;
 
 /* ---------------- Übungsdetail ---------------- */
 const chartMode = {};
@@ -829,8 +931,30 @@ function fillFromPrev(s, i) {
   if (!s.startedAt && s.status === 'active') s.startedAt = Date.now();
 }
 
+function mxInput(t, final) {
+  const test = currentTest(); if (!test) return;
+  const ex = test.exercises[+t.dataset.mx], k = +t.dataset.at;
+  const rowW = $app.querySelector(`input[data-mx="${t.dataset.mx}"][data-at="${k}"][data-f="w"]`);
+  const rowR = $app.querySelector(`input[data-mx="${t.dataset.mx}"][data-at="${k}"][data-f="r"]`);
+  const w = parseNum(rowW.value), r = parseInt0(rowR.value);
+  t.classList.toggle('invalid', Number.isNaN(t.dataset.f === 'w' ? w : r));
+  const wasValid = !!ex.attempts[k] && isValidSet(ex.attempts[k]);
+  if (!ex.attempts[k]) { if (r == null || Number.isNaN(r)) return; ex.attempts[k] = { w: null, r: null }; }
+  ex.attempts[k].w = Number.isNaN(w) ? null : w; ex.attempts[k].r = Number.isNaN(r) ? null : r;
+  save();
+  const nowValid = isValidSet(ex.attempts[k]);
+  const complete = t.dataset.f === 'r' && r != null && !Number.isNaN(r) && (final || t.value.length >= 2 || r >= 4);
+  if (complete && nowValid) {
+    rerenderKeepScroll();
+    if (!wasValid && test.status === 'active') {
+      const st = L.maxTestState(ex), nextEx = test.exercises.slice(+t.dataset.mx + 1).find(e => !e.skipped);
+      Rest.start(st.done && nextEx ? L.maxRestBefore(ex.name, nextEx.name) : 180, st.done ? (nextEx ? `${nextEx.name} (aufwärmen)` : 'Test abschließen') : `${ex.name} · ${fmtNum(st.next)} kg`);
+    }
+  }
+}
 $app.addEventListener('input', ev => {
   const t = ev.target;
+  if (t.dataset.mx != null && t.dataset.f) { mxInput(t, false); return; }
   if (t.dataset.f) {
     const s = currentSession(); if (!s) return;
     const i = +t.dataset.ex, j = +t.dataset.set, set = s.exercises[i].sets[j];
@@ -867,6 +991,8 @@ $app.addEventListener('input', ev => {
 
 $app.addEventListener('change', ev => {
   const t = ev.target;
+  if (t.dataset.mx != null && t.dataset.f) { if (t.dataset.f === 'r') mxInput(t, true); return; }
+  if (t.dataset.act === 'mx-date') { const test = currentTest(); if (test && t.value) { test.date = t.value > todayISO() ? todayISO() : t.value; save(); toast('Datum geändert'); } return; }
   if (t.dataset.act === 'date') { const s = currentSession(); if (t.value) { s.date = t.value > todayISO() ? todayISO() : t.value; save(); rerenderKeepScroll(); toast('Datum geändert'); } return; }
   if (t.dataset.f === 'w') {
     // Neues Gewicht an die folgenden Sätze derselben Übung weitergeben, solange dort noch keine
@@ -963,6 +1089,39 @@ $app.addEventListener('click', ev => {
       if (!e) return;
       if (!confirm(`„${e.name}“ im Plan durch „${name}“ ersetzen?\n\nSätze, Pause und Supersatz bleiben gleich. „${name}“ startet mit einem eigenen Verlauf – deine bisherigen Einträge bleiben im Fortschritt unter „Weitere Übungen“ erhalten.`)) return;
       const old = L.swapExercise(plan, e.id, name); save(); rerenderKeepScroll(); toast(`${old} → ${name}`); break;
+    }
+    case 'max-start': {
+      let t = (db.maxTests || []).find(x => x.status === 'active');
+      if (!t) { const plan = activePlan(); if (!plan) return; t = L.newMaxTest(plan, todayISO()); db.maxTests = db.maxTests || []; db.maxTests.push(t); save(); }
+      location.hash = `#/maxkraft/test/${t.id}`; break;
+    }
+    case 'max-every': db.settings = Object.assign({}, db.settings, { maxTestEvery: Math.min(16, Math.max(2, Math.round((db.settings?.maxTestEvery || 28) / 7) + +b.dataset.d)) * 7 }); save(); rerenderKeepScroll(); break;
+    case 'mx-warm': {
+      const ex = currentTest().exercises[+b.dataset.mx], k = +b.dataset.k;
+      ex.warmDone = ex.warmDone.includes(k) ? ex.warmDone.filter(x => x !== k) : ex.warmDone.concat(k);
+      save(); rerenderKeepScroll(); break;
+    }
+    case 'mx-skip': currentTest().exercises[+b.dataset.mx].skipped = true; save(); rerenderKeepScroll(); break;
+    case 'mx-unskip': currentTest().exercises[+b.dataset.mx].skipped = false; save(); rerenderKeepScroll(); break;
+    case 'mx-more': {
+      // Nach einem Fehlversuch doch noch einmal probieren: letzten Versuch als nicht gezählt markieren ist nicht nötig – einfach neue Zeile
+      const ex = currentTest().exercises[+b.dataset.mx], last = ex.attempts[ex.attempts.length - 1];
+      ex.attempts.push({ w: last ? last.w : null, r: null }); save(); rerenderKeepScroll(); break;
+    }
+    case 'mx-finish': {
+      const t = currentTest();
+      if (!t.exercises.some(e => e.attempts.some(isValidSet))) { toast('Trage mindestens einen Versuch ein.'); return; }
+      const open = t.exercises.filter(e => !e.skipped && !e.attempts.some(isValidSet));
+      if (open.length && !confirm(`${open.length} Übung(en) ohne Versuch werden als übersprungen gespeichert. Test abschließen?`)) return;
+      open.forEach(e => { e.skipped = true; });
+      t.exercises.forEach(e => { e.attempts = e.attempts.filter(isValidSet); });
+      t.status = 'done'; t.finishedAt = Date.now(); delete t.rest; save(); Rest.stop();
+      location.hash = '#/maxkraft'; toast('Test gespeichert 💪'); break;
+    }
+    case 'mx-discard': {
+      const t = currentTest();
+      if (!confirm(t.status === 'active' ? 'Laufenden Test verwerfen?' : 'Diesen Test endgültig löschen?')) return;
+      db.maxTests = db.maxTests.filter(x => x !== t); delete t.rest; save(); Rest.stop(); location.hash = '#/maxkraft'; break;
     }
     case 'goal': db.settings = Object.assign({}, db.settings, { weeklyGoal: Math.min(7, Math.max(1, (db.settings?.weeklyGoal || 3) + +b.dataset.d)) }); save(); rerenderKeepScroll(); break;
     case 'unskip': ex.skipped = false; save(); rerenderKeepScroll(); break;

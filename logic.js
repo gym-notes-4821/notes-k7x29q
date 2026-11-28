@@ -126,7 +126,7 @@ function baselineSession(plan, date) {
 }
 function freshDb() {
   const plan = defaultPlan();
-  return { version: DATA_VERSION, plans: [plan], sessions: [baselineSession(plan)], activePlanId: plan.id, lastExport: null, settings: { sound: true, weeklyGoal: 3 }, notes: {} };
+  return { version: DATA_VERSION, plans: [plan], sessions: [baselineSession(plan)], activePlanId: plan.id, lastExport: null, settings: { sound: true, weeklyGoal: 3, maxTestEvery: 28 }, notes: {}, maxTests: [] };
 }
 
 /* ---------------- Migration ---------------- */
@@ -175,7 +175,7 @@ function renameInStartPlan(d, oldName, newName) {
   }
 }
 const validDb = d => !!d && Array.isArray(d.plans) && Array.isArray(d.sessions);
-const DATA_VERSION = 11;
+const DATA_VERSION = 12;
 /** Bringt Daten beliebiger älterer Version auf die aktuelle Version. Selbst eingetragene Trainings bleiben unverändert. */
 function migrate(input) {
   if (!validDb(input)) throw new Error('Ungültiges Datenformat');
@@ -326,6 +326,12 @@ function migrate(input) {
     d.settings = Object.assign({ sound: true, weeklyGoal: 3 }, d.settings);
     d.notes = d.notes || {};
     d.version = 11;
+  }
+  if (d.version < 12) {
+    // Version 12: Maximalkrafttests (5RM) und Test-Rhythmus in Tagen
+    d.maxTests = d.maxTests || [];
+    d.settings = Object.assign({ maxTestEvery: 28 }, d.settings);
+    d.version = 12;
   }
   if (!d.plans.some(p => p.id === d.activePlanId)) d.activePlanId = d.plans[0] ? d.plans[0].id : null;
   return d;
@@ -636,6 +642,88 @@ function setNote(key, text) {
   if (t) db.notes[canon(key)] = t; else delete db.notes[canon(key)];
 }
 
+/* ---------------- Maximalkraft (5RM-Test) ---------------- */
+/** Grundübungen, die sich für einen 5RM-Test eignen (Kategorie: 0 Kniebeuge, 1 Drücken, 2 Kreuzheben, 3 Latziehen, 4 Schulterdrücken, 5 Rudern). */
+const MAX_CATEGORIES = [
+  [/squat|kniebeuge|hackenschmidt|beinpresse/, 0], [/bankdrücken|bench|brustpresse|dips/, 1], [/kreuzheben|deadlift/, 2],
+  [/latziehen|latzug|klimmz/, 3], [/schulterdrücken|overhead|military|schulterpresse|arnold/, 4], [/rudern|row/, 5],
+];
+const maxCategory = name => { const n = normKey(name); const hit = MAX_CATEGORIES.find(([re]) => re.test(n)); return hit ? hit[1] : -1; };
+const MAX_REPS = 5;
+/** Pause nach der letzten Versuchsreihe einer Übung: vor Kreuzheben direkt nach Kniebeugen länger erholen. */
+const maxRestBefore = (prevName, nextName) => maxCategory(prevName) === 0 && maxCategory(nextName) === 2 ? 300 : 180;
+const roundStep = (w, step, dir = 0) => (dir < 0 ? Math.floor(w / step) : dir > 0 ? Math.ceil(w / step) : Math.round(w / step)) * step;
+/** Aktuelle Schätzung des Maximalgewichts (1RM): jüngster Wert aus Training oder Test. */
+function currentE1(key) {
+  const h = exerciseHistory(key);
+  const fromTraining = h.length ? { e1: bestE1(h[h.length - 1].sets), date: h[h.length - 1].session.date } : null;
+  const t = maxTestHistory(key);
+  const fromTest = t.length ? { e1: t[t.length - 1].result.e1, date: t[t.length - 1].date } : null;
+  if (fromTraining && fromTest) return fromTest.date >= fromTraining.date ? fromTest : fromTraining;
+  return fromTraining || fromTest;
+}
+/** Testplan einer Übung: erwartetes 5RM, Startgewicht und Aufwärmsätze (50 % × 8, 70 % × 5, 85 % × 2). */
+function maxTestPlan(key, perDumbbell) {
+  const step = perDumbbell ? 1 : 2.5, cur = currentE1(key);
+  if (!cur) return { step, expected: null, start: null, warmups: [] };
+  const expected = cur.e1 / (1 + MAX_REPS / 30);           // Epley rückwärts: 5RM ≈ 86 % des 1RM
+  const start = Math.max(step, roundStep(expected * 0.95, step, -1));
+  const warmups = [];
+  for (const [f, r] of [[0.5, 8], [0.7, 5], [0.85, 2]]) {
+    const w = Math.max(step, roundStep(start * f, step));
+    if (!warmups.length || w > warmups[warmups.length - 1].w) warmups.push({ w, r });
+  }
+  return { step, expected, start, warmups: warmups.filter(x => x.w < start) };
+}
+/**
+ * Auswertung der Versuche: Ergebnis (schwerster Versuch mit mind. 5 Wdh.), geschätztes 1RM und Vorschlag für den nächsten Versuch.
+ * Nach einem Versuch mit weniger als 5 Wdh. oder nach 5 Versuchen ist der Test für die Übung beendet.
+ */
+function maxTestState(ex) {
+  const step = ex.perDumbbell ? 1 : 2.5;
+  const att = (ex.attempts || []).filter(a => isValidSet(a));
+  const ok = att.filter(a => a.r >= MAX_REPS);
+  const best5 = ok.length ? ok.reduce((a, b) => b.w > a.w ? b : a) : null;
+  const e1 = att.length ? Math.max(...att.filter(a => a.r <= 12).map(e1rm).concat([0])) : 0;
+  const result = att.length ? { w5: best5 ? best5.w : null, e1: round1(e1) || null } : null;
+  const last = att[att.length - 1];
+  let done = false, next = null, msg = '';
+  if (!last) msg = 'Starte mit dem vorgeschlagenen Gewicht.';
+  else if (last.r < MAX_REPS) { done = true; msg = best5 ? `Fertig: ${fmtNum(best5.w)} kg × 5 war dein bester sauberer Versuch.` : `Fertig: ${fmtSet(last)} – daraus geschätzt.`; }
+  else if (att.length >= 5) { done = true; msg = 'Fertig: Nach 5 Versuchen ist Schluss – mehr ermüdet nur.'; }
+  else {
+    // Bei deutlich mehr als 5 Wdh. direkt auf das geschätzte 5RM springen, sonst ca. +5 %
+    const target = last.r >= 8 ? e1rm(last) / (1 + MAX_REPS / 30) : last.w * 1.05;
+    next = Math.max(last.w + step, roundStep(target, step, -1));
+    msg = last.r >= 8 ? `${last.r} Wiederholungen – da geht deutlich mehr. Nächster Versuch: ${fmtNum(next)} kg.` : `Sauber geschafft! Nächster Versuch: ${fmtNum(next)} kg.`;
+  }
+  return { result, done, next, msg, attempts: att.length };
+}
+/** Test in der Reihenfolge des Trainingsplans – vertraut und vergleichbar mit den Trainingswerten. */
+function newMaxTest(plan, date) {
+  const exs = plan.exercises.filter(e => maxCategory(e.name) >= 0);
+  return { id: uid(), planId: plan.id, date: date || todayISO(), createdAt: Date.now(), status: 'active',
+    exercises: exs.map(e => ({ name: e.name, key: normKey(e.name), perDumbbell: !!e.perDumbbell, attempts: [], warmDone: [], skipped: false })) };
+}
+/** Abgeschlossene Testergebnisse einer Übung, chronologisch. */
+function maxTestHistory(key) {
+  const out = [];
+  for (const t of ((db && db.maxTests) || []).filter(t => t.status === 'done').sort(sessionOrder))
+    for (const ex of t.exercises) if (!ex.skipped && sameEx(ex.key, key)) {
+      const st = maxTestState(ex);
+      if (st.result && st.result.e1) out.push({ date: t.date, testId: t.id, result: st.result, name: ex.name });
+    }
+  return out;
+}
+/** Fälligkeit des nächsten Tests (Standard alle 28 Tage). */
+function maxTestDue(refISO = todayISO()) {
+  const every = (db.settings && db.settings.maxTestEvery) || 28;
+  const done = ((db && db.maxTests) || []).filter(t => t.status === 'done').sort(sessionOrder);
+  if (!done.length) return { last: null, days: null, due: true, inDays: 0, every };
+  const last = done[done.length - 1].date, days = dayNum(refISO) - dayNum(last);
+  return { last, days, due: days >= every, inDays: Math.max(0, every - days), every };
+}
+
 /* ---------------- Coach ---------------- */
 /** Alternativen je Übung (Stichwort im Namen → Vorschläge mit kurzem Grund). Erste passende Regel gilt. */
 const ALTERNATIVES = [
@@ -836,7 +924,8 @@ const api = {
   rankSets, cmpPair, compareSets, diffText, explain, trendFor, analyzeExercise, latestProgress, planProgress,
   forecastFor, forecastText, planForecast, blocks, normalizeGroups, MAX_WEEKLY, TAU_WEEKS, effWeeks, isWorkSet,
   recordsFor, sessionStats, shortDelta, weekCount, noteFor, setNote,
-  ALTERNATIVES, alternativesFor, exerciseState, coachReport, estimateMinutes, swapExercise, coachTips, MUSCLES, musclesOf, planMuscleLoad, muscleLevel, prefillWeights, isUntouched,
+  ALTERNATIVES, alternativesFor, exerciseState, coachReport, estimateMinutes, swapExercise, coachTips,
+  maxCategory, maxRestBefore, MAX_REPS, currentE1, maxTestPlan, maxTestState, newMaxTest, maxTestHistory, maxTestDue, MUSCLES, musclesOf, planMuscleLoad, muscleLevel, prefillWeights, isUntouched,
 };
 if (typeof module !== 'undefined' && module.exports) module.exports = api;
 else root.Logic = api;

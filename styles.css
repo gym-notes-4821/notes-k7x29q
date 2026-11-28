@@ -415,7 +415,7 @@ svg .fline { fill: none; }
 
 /* ---------------- Coach ---------------- */
 .tiles { grid-template-rows: 1fr 1fr auto; }
-.tile-coach { grid-column: 1 / -1; flex-direction: row; justify-content: flex-start; gap: 14px; padding: 14px 18px; min-height: 84px; text-align: left; }
+.tile-coach-old { grid-column: 1 / -1; flex-direction: row; justify-content: flex-start; gap: 14px; padding: 14px 18px; min-height: 84px; text-align: left; }
 .tile-coach .ic { width: 52px; height: 52px; border-radius: 16px; }
 .tile-coach .ic .i { width: 30px; height: 30px; }
 .tile-coach .tc { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
@@ -455,3 +455,48 @@ svg .fline { fill: none; }
 .cc-check span { display: flex; flex-direction: column; }
 .cc-check small { color: var(--muted); font-size: 13px; }
 .cc-check.ok > .i { color: var(--up); } .cc-check.warn > .i { color: var(--down); } .cc-check.info > .i { color: var(--muted); }
+
+/* ---------------- Kleine Kacheln: Coach & Maximalkraft ---------------- */
+.tile-small { flex-direction: row; justify-content: flex-start; align-items: center; gap: 10px; padding: 12px; min-height: 76px; text-align: left; font-size: 17px; }
+.tile-small .ic { width: 42px; height: 42px; border-radius: 13px; flex: none; }
+.tile-small .ic .i { width: 24px; height: 24px; }
+.tile-small .tc { display: flex; flex-direction: column; gap: 1px; min-width: 0; }
+.tile-small .tl { font-size: 17px; }
+.tile-small .tsub { font-size: 13px; font-weight: 600; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.tile-small .tsub.warn { color: var(--down); }
+.tile-small .hint { top: 8px; right: 8px; min-width: 24px; text-align: center; font-size: 13px; padding: 2px 7px; background: var(--down); color: #000; }
+
+/* ---------------- Maximalkraft ---------------- */
+.coach-hero .btn .i, .coach-hero button .i { width: 22px; height: 22px; }
+.mx-list { padding: 4px 14px; }
+.mx-row { display: flex; align-items: center; gap: 10px; padding: 10px 0; border-top: 1px solid var(--line); }
+.mx-row:first-child { border-top: 0; }
+.mx-row .c-delta b { font-weight: 800; }
+.mx-val { display: flex; flex-direction: column; align-items: flex-end; min-width: 62px; }
+.mx-val b { font-size: 22px; color: var(--accent); font-variant-numeric: tabular-nums; }
+.mx-val small { font-size: 11px; color: var(--muted); }
+.mx-how summary { cursor: pointer; font-weight: 800; color: var(--accent); list-style: none; }
+.mx-how summary::-webkit-details-marker { display: none; }
+.mx-how ol { margin: 10px 0 6px; padding-left: 20px; display: grid; gap: 6px; font-size: 15px; }
+.mx-card.mx-done { border: 1.5px solid rgba(57,255,20,.4); }
+.mx-warm { display: flex; flex-wrap: wrap; gap: 8px; }
+.mx-warm .chip { display: inline-flex; align-items: center; gap: 4px; }
+.mx-warm .chip .i { width: 14px; height: 14px; }
+.mx-set { grid-template-columns: 28px minmax(0, 1fr) 16px minmax(0, 1fr); }
+.mx-msg { font-size: 15px; font-weight: 700; color: var(--text); margin: 4px 0 6px; }
+.mx-msg.done { color: var(--accent); }
+.mx-result { display: grid; grid-template-columns: repeat(auto-fit, minmax(90px, 1fr)); gap: 8px; margin: 6px 0 4px; }
+.mx-result div { background: rgba(57,255,20,.08); border: 1px solid rgba(57,255,20,.3); border-radius: 12px; padding: 8px 10px; display: flex; flex-direction: column; }
+.mx-result span { font-size: 12px; color: var(--muted); }
+.mx-result b { font-size: 18px; }
+.tag .i { width: 12px; height: 12px; vertical-align: -1px; }
+
+.tiles { grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); }
+.tile { min-width: 0; }
+.tile-small .tl { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; max-width: 100%; }
+
+/* Kleine Kacheln: Symbol über dem Text, damit lange Namen passen */
+.tile-small { flex-direction: column; align-items: flex-start; justify-content: center; gap: 8px; padding: 12px 14px; }
+.tile-small .ic { width: 36px; height: 36px; border-radius: 11px; }
+.tile-small .ic .i { width: 21px; height: 21px; }
+.mx-row .c-delta { white-space: normal; }

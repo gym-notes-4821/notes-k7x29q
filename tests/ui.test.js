@@ -21,8 +21,8 @@ const STORE = 'trainingsapp.v1';
 
   // 1. Startseite + Planauswahl
   await go('');
-  ok(await page.locator('.tile').count() === 5, '1 Startseite zeigt fünf Kacheln');
-  ok((await page.locator('.tile .tl').allInnerTexts()).join('|') === 'Trainingspläne|Training|Fortschritt|Ausblick|Coach', '1 Kacheln in richtiger Reihenfolge');
+  ok(await page.locator('.tile').count() === 6, '1 Startseite zeigt sechs Kacheln');
+  ok((await page.locator('.tile .tl').allInnerTexts()).join('|') === 'Trainingspläne|Training|Fortschritt|Ausblick|Coach|Maximalkraft', '1 Kacheln in richtiger Reihenfolge');
   ok((await page.locator('.active-plan').innerText()).includes('Ganzkörperplan'), '1 Aktiver Plan angezeigt');
   ok(await page.locator('#tabbar').count() === 0, '1 Keine Tab-Leiste mehr');
   await shot(page, '1-start');
@@ -270,7 +270,7 @@ const STORE = 'trainingsapp.v1';
   // Offline
   await go(''); await page.waitForTimeout(800);
   await ctx.setOffline(true); await page.reload();
-  ok(await page.locator('.tile').count() === 5, 'App lädt offline');
+  ok(await page.locator('.tile').count() === 6, 'App lädt offline');
   await ctx.setOffline(false);
 
   // Coach: Stagnation und Rückgang erkennen, Alternativen vorschlagen und tauschen
@@ -289,9 +289,10 @@ const STORE = 'trainingsapp.v1';
     }
     localStorage.setItem(k, JSON.stringify(d));
   }, STORE);
-  await p3.reload(); await p3.waitForSelector('.tile-coach');
-  ok((await p3.locator('.tile-coach').innerText()).includes('2 Übungen brauchen Aufmerksamkeit'), 'Coach-Kachel zeigt 2 Hinweise');
-  await p3.click('.tile-coach'); await p3.waitForSelector('.coach-hero');
+  await p3.reload(); await p3.waitForSelector('.tile-small');
+  const coachTile = p3.locator('.tile-small', { hasText: 'Coach' });
+  ok((await coachTile.innerText()).includes('2 Hinweise'), 'Coach-Kachel zeigt 2 Hinweise');
+  await coachTile.click(); await p3.waitForSelector('.coach-hero');
   ok((await p3.locator('.coach-hero').innerText()).includes('2 Übungen brauchen Aufmerksamkeit'), 'Coach: Gesamtbewertung');
   const sqCard = p3.locator('.coach-card', { has: p3.locator('.pname', { hasText: /^Squats$/ }) });
   ok((await sqCard.innerText()).includes('Stagniert') && (await sqCard.innerText()).includes('Seit 5 Trainings'), 'Coach: Squats stagniert seit 5 Trainings');
@@ -306,6 +307,40 @@ const STORE = 'trainingsapp.v1';
   ok(err3 === 0, 'Coach: keine Fehler');
   await ctx3.close();
 
+  // Maximalkraft: geführter 5RM-Test
+  const ctx4 = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true, hasTouch: true });
+  const p4 = await ctx4.newPage(); p4.on('dialog', d => d.accept());
+  let err4 = 0; p4.on('pageerror', e => { console.log('PAGEERROR', e.message); err4++; });
+  await p4.goto(URL); await p4.evaluate(() => localStorage.clear()); await p4.reload(); await p4.waitForSelector('.tile');
+  const mxTile = p4.locator('.tile-small', { hasText: 'Maximalkraft' });
+  ok((await mxTile.innerText()).includes('noch kein Test'), 'Maximalkraft-Kachel: noch kein Test');
+  await mxTile.click(); await p4.waitForSelector('.coach-hero');
+  ok((await p4.locator('.mx-list').innerText()).includes('aus dem Training geschätzt'), 'Übersicht zeigt Schätzung aus dem Training');
+  await p4.click('[data-act=max-start]'); await p4.waitForSelector('.mx-card');
+  ok((await p4.locator('.mx-card h3').allInnerTexts()).join('|') === '1. Squats|2. Kreuzheben|3. Latziehen|4. Bankdrücken mit Kurzhanteln|5. Rudern sitzend|6. Schulterdrücken', 'Test: Reihenfolge wie im Training');
+  const latCard = p4.locator('.mx-card', { has: p4.locator('h3', { hasText: 'Latziehen' }) });
+  ok((await latCard.locator('.last').innerText()).includes('Erwartet: ca. 55 kg × 5'), 'Test: erwartetes 5RM aus dem Training');
+  ok(await latCard.locator('input[data-f=w]').first().inputValue() === '50', 'Test: Startgewicht vorbelegt (50 kg)');
+  ok(await latCard.locator('.mx-warm .chip').count() === 3, 'Test: drei Aufwärmsätze');
+  await latCard.locator('.mx-warm .chip').first().click();
+  ok(await latCard.locator('.mx-warm .chip.on').count() === 1, 'Aufwärmsatz abhaken');
+  await latCard.locator('input[data-f=r]').first().fill('9'); await latCard.locator('input[data-f=r]').first().blur(); await p4.waitForTimeout(150);
+  ok((await latCard.locator('.mx-msg').innerText()).includes('Nächster Versuch: 55 kg') && await latCard.locator('input[data-f=w]').nth(1).inputValue() === '55', 'Test: nächster Versuch vorgeschlagen und vorbelegt');
+  ok(await p4.locator('#rest').isVisible() && /^(3:00|2:5\d)$/.test(await p4.locator('#rest .rest-time').innerText()), 'Test: 3 Minuten Pause');
+  await latCard.locator('input[data-f=r]').nth(1).fill('5'); await latCard.locator('input[data-f=r]').nth(1).blur(); await p4.waitForTimeout(150);
+  await latCard.locator('input[data-f=r]').nth(2).fill('3'); await latCard.locator('input[data-f=r]').nth(2).blur(); await p4.waitForTimeout(150);
+  ok((await latCard.locator('.mx-result').innerText()).includes('55 kg') && (await latCard.locator('.mx-result').innerText()).includes('ca. 65 kg'), 'Test: Ergebnis 5RM 55 kg, Maximalkraft ca. 65 kg');
+  await p4.reload(); await p4.waitForSelector('.mx-card');
+  ok((await p4.locator('.mx-card', { has: p4.locator('h3', { hasText: 'Latziehen' }) }).locator('.mx-result').count()) === 1, 'Test übersteht Neuladen');
+  await p4.click('[data-act=mx-finish]'); await p4.waitForSelector('.mx-list');
+  ok((await p4.locator('.mx-list').innerText()).includes('5RM 55 kg × 5') && (await p4.locator('.coach-hero').innerText()).includes('Nächster Test in 28 Tagen'), 'Übersicht: Ergebnis und nächster Test in 4 Wochen');
+  const d4 = await p4.evaluate(k => JSON.parse(localStorage.getItem(k)), STORE);
+  ok(d4.maxTests.length === 1 && d4.maxTests[0].exercises.filter(e => e.skipped).length === 5, 'Nicht getestete Übungen als übersprungen gespeichert');
+  ok(!d4.sessions.some(s => s.status === 'active'), 'Test verändert keine Trainings');
+  for (const h of ['#/maxkraft', '#/maxkraft/test/' + d4.maxTests[0].id, '']) { await p4.goto(URL + h); await p4.waitForTimeout(200); ok(await p4.evaluate(() => document.documentElement.scrollWidth) <= 390, 'Keine Überbreite ' + (h || 'Start')); }
+  ok(err4 === 0, 'Maximalkraft: keine Fehler');
+  await ctx4.close();
+
   // 8. Migration Version 1 in frischem Kontext
   const ctx2 = await browser.newContext({ viewport: { width: 390, height: 844 }, isMobile: true });
   const p2 = await ctx2.newPage();
@@ -315,7 +350,7 @@ const STORE = 'trainingsapp.v1';
   await p2.evaluate(([k, d]) => localStorage.setItem(k, JSON.stringify(d)), [STORE, v1]);
   await p2.reload(); await p2.waitForSelector('.tile');
   const d2 = await p2.evaluate(k => JSON.parse(localStorage.getItem(k)), STORE);
-  ok(err2 === 0 && d2.version === 11 && d2.sessions.some(s => s.id === 'old1'), '8 Version-1-Daten laden ohne Fehler, alte Trainings erhalten');
+  ok(err2 === 0 && d2.version === 12 && d2.sessions.some(s => s.id === 'old1'), '8 Version-1-Daten laden ohne Fehler, alte Trainings erhalten');
   await p2.goto(URL + '#/fortschritt'); await p2.waitForSelector('.prow');
   ok(await p2.locator('h2', { hasText: 'Weitere Übungen' }).count() === 1, '8 Alte Übungen bleiben als „Weitere Übungen“ erreichbar');
   await p2.goto(URL + '#/fortschritt/uebung/latziehen'); await p2.waitForSelector('.hist');
